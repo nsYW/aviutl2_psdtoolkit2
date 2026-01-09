@@ -1,0 +1,12 @@
+// psdtoolkit.rc
+// Application manifest resource
+
+#define APSTUDIO_HIDDEN_SYMBOLS
+#include <windows.h>
+#undef APSTUDIO_HIDDEN_SYMBOLS
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+
+1 RT_MANIFEST "psdtoolkit.manifest"
+
+101 ICON "../img/icon.ico"

@@ -1,0 +1,113 @@
+name: releaser
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+alpha[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+beta[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+rc[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Get the version
+        id: get_version
+        shell: bash
+        run: |
+          echo "tag=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_OUTPUT
+      - name: Build
+        shell: bash
+        run: |
+          docker run --net host --rm -i -v .:/root/repo -w /root/repo ubuntu:22.04 /bin/bash -c 'apt update && apt install -y git curl unzip && git config --system --add safe.directory "*" && LANG="C.UTF-8" TZ="JST-9" bash build.bash --skip-tests --zip'
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            build/Release/x86_64/bin/
+            build/Release/x86_64/src/c/version.env
+            build/Release/dist/
+      - name: Attest build artifacts
+        id: attest-zip
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "build/Release/dist/psdtoolkit_*.zip"
+      - name: Prepare attestation for upload
+        shell: bash
+        run: |
+          VERSION="${{ steps.get_version.outputs.tag }}"
+          mkdir -p attestations
+          cp "${{ steps.attest-zip.outputs.bundle-path }}" "attestations/psdtoolkit_${VERSION}.zip.attestation.jsonl"
+      - name: Upload attestation for zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: attestation-zip
+          path: attestations/
+          retention-days: 1
+
+  installer-and-release:
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: build/Release/
+      - name: Download attestation for zip
+        uses: actions/download-artifact@v4
+        with:
+          name: attestation-zip
+          path: attestations/
+      - name: Install Inno Setup
+        shell: bash
+        run: |
+          # Exit code is based on lower 16 bits of HRESULT (0x8A15002B & 0xFFFF = 43)
+          # 43 = APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE (already installed, no update available)
+          winget install --id JRSoftware.InnoSetup -e -s winget --accept-source-agreements --accept-package-agreements || test $? -eq 43
+      - name: Build installer
+        shell: bash
+        run: |
+          bash build.bash --skip-tests --installer
+      - name: Attest installer
+        id: attest-installer
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "build/Release/dist/psdtoolkit_*_setup.exe"
+      - name: Prepare installer attestation
+        shell: bash
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          cp "${{ steps.attest-installer.outputs.bundle-path }}" "attestations/psdtoolkit_${VERSION}_setup.exe.attestation.jsonl"
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.CREATE_RELEASE_SECRET }}
+          VERSION: ${{ needs.build.outputs.version }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          envsubst < .github/RELEASE_TEMPLATE.md > release_notes.md
+          gh release create "${VERSION}" \
+            --draft \
+            --title "${VERSION}" \
+            --notes-file release_notes.md \
+            "build/Release/dist/psdtoolkit_${VERSION}.zip" \
+            "build/Release/dist/psdtoolkit_${VERSION}_setup.exe" \
+            "attestations/psdtoolkit_${VERSION}.zip.attestation.jsonl" \
+            "attestations/psdtoolkit_${VERSION}_setup.exe.attestation.jsonl"

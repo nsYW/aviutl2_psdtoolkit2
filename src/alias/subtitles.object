@@ -1,0 +1,4 @@
+[Object]
+[Object.0]
+effect.name=テキスト
+テキスト=<?o={-- 字幕表示    \n\nid = ""    ,-- "キャラクターID" or "L1" <- レイヤー番号\n\n}require("PSDToolKit").mes(o, obj)\n?>

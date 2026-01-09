@@ -1,0 +1,8 @@
+[Object]
+[Object.0]
+effect.name=PSDファイル@PSDToolKit
+PSDファイル=%PSDFILE%
+タグ=%TAG%
+レイヤー=%LAYER%
+[Object.1]
+effect.name=描画@PSDToolKit

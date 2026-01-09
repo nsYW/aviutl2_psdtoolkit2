@@ -1,0 +1,12 @@
+[submodule "src/c/3rd/ovbase"]
+	path = src/c/3rd/ovbase
+	url = https://github.com/oov/ovbase
+[submodule "src/c/3rd/ovl"]
+	path = src/c/3rd/ovl
+	url = https://github.com/oov/ovl
+[submodule "src/c/3rd/yyjson"]
+	path = src/c/3rd/yyjson
+	url = https://github.com/ibireme/yyjson
+[submodule "src/c/3rd/aviutl2_plugin_sdk_for_c"]
+	path = src/c/3rd/aviutl2_plugin_sdk_for_c
+	url = https://github.com/oov/aviutl2_plugin_sdk_for_c

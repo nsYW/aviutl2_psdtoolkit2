@@ -1,0 +1,19 @@
+--track0:!目,0,5,0,1
+--track1:!くち,0,6,0,1
+local values= {
+  require("PSDToolKit.Blinker").new_legacy({"v1.!目/*つぶり","v1.!目/*通常"},4,1,0),
+  "v1.!目/*通常",
+  "v1.!目/*にっこり",
+  "v1.!目/*ぐるぐる",
+  "v1.!目/*つぶり",
+}
+require("PSDToolKit").add_state_legacy(values, obj.track0)
+local values= {
+  require("PSDToolKit.LipSync").new_legacy({"v1.!くち/*ふぇー","v1.!くち/*ワ"},1,true),
+  require("PSDToolKit.LipSyncLab").new_legacy({a="v1.!くち/*ワ",i="v1.!くち/*ワ",u="v1.!くち/*ワ",e="v1.!くち/*ワ",o="v1.!くち/*ワ",N="v1.!くち/*ワ"},1,true),
+  "v1.!くち/*ワ",
+  "v1.!くち/*ムー",
+  "v1.!くち/*ふぇー",
+  "v1.!くち/*あー！",
+}
+require("PSDToolKit").add_state_legacy(values, obj.track1)

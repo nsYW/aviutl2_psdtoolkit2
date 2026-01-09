@@ -1,0 +1,545 @@
+# Japanese translations for PSDToolKit vX.X.X ( unknown ) package.
+# Copyright (C) 2025 PSDToolKit Developers
+# This file is distributed under the same license as the PSDToolKit package.
+# Automatically generated, 2025.
+#
+msgid ""
+msgstr ""
+"Report-Msgid-Bugs-To: \n"
+"Last-Translator: Automatically generated\n"
+"Language-Team: none\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgctxt "layer"
+msgid "%1$hs (Selected in AviUtl)"
+msgstr "%1$hs (AviUtl で選択)"
+
+msgctxt "layer"
+msgid "%1$hs (Selected in anm2 Editor)"
+msgstr "%1$hs (anm2 Editor で選択)"
+
+msgctxt "anm2editor"
+msgid "%1$hs Selector"
+msgstr "%1$hs セレクター"
+
+msgctxt "anm2editor"
+msgid "(Add new...)"
+msgstr "(新規追加...)"
+
+msgctxt "anm2editor"
+msgid "(Unnamed Item)"
+msgstr "(名称未設定アイテム)"
+
+msgctxt "anm2editor"
+msgid "(Unnamed Selector)"
+msgstr "(名称未設定セレクター)"
+
+msgctxt "script_picker"
+msgid "(empty)"
+msgstr "(未設定)"
+
+msgctxt "anm2editor"
+msgid ""
+"1. Select a PSD File object in AviUtl ExEdit2\n"
+"2. Add effects like \"Blinker@PSDToolKit\" and configure them\n"
+"3. Press this button\n"
+"\n"
+"This feature imports animation settings from the selected PSD File object."
+msgstr ""
+"1. AviUtl ExEdit2 で PSDファイル オブジェクト選択する\n"
+"2. 「目パチ@PSDToolKit」などのオブジェクトを追加し、設定を行う\n"
+"3. このボタンを押す\n"
+"\n"
+"これは選択された PSD ファイルオブジェクトからアニメーション設定を取り込む機能です。"
+
+msgid "A different PSD file is assigned to the destination. Do you want to continue?"
+msgstr "転送先には異なる PSD ファイルが割り当てられいます。続行しますか？"
+
+msgctxt "anm2editor"
+msgid "Add Selector"
+msgstr "セレクターを追加"
+
+msgctxt "layer"
+msgid "Add all child layers of to anm2 Editor"
+msgstr "すべての子階層レイヤーを anm2 エディターに追加"
+
+msgctxt "layer"
+msgid "Add entire slider to anm2 Editor"
+msgstr "スライダー全体を anm2 エディターに追加"
+
+msgctxt "layer"
+msgid "Add to anm2 Editor"
+msgstr "anm2 エディターに追加"
+
+msgctxt "anm2editor"
+msgid "All Files"
+msgstr "全てのファイル"
+
+msgid "An error occurred while loading project data."
+msgstr "プロジェクトデータの読み込み中にエラーが発生しました。"
+
+msgid "An error occurred while saving project data."
+msgstr "プロジェクトデータの保存中にエラーが発生しました。"
+
+msgctxt "anm2editor"
+msgid "An error occurred."
+msgstr "エラーが発生しました。"
+
+msgid "Assign \"%1$hs\" to \"%2$hs\""
+msgstr "\"%1$hs\" を \"%2$hs\" へ割り当て"
+
+msgctxt "config"
+msgid "Audio File Drop Extension"
+msgstr "音声ファイルドロップ拡張"
+
+msgctxt "anm2editor"
+msgid "AviUtl ExEdit2 Animation Script"
+msgstr "AviUtl ExEdit2 アニメーションスクリプト"
+
+msgctxt "anm2editor"
+msgid "AviUtl1 Animation Script"
+msgstr "AviUtl1 アニメーションスクリプト"
+
+msgctxt "config"
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgctxt "script_picker"
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgctxt "gui"
+msgid "Capture"
+msgstr "取り込む"
+
+msgctxt "anm2editor"
+msgid "Conversion completed."
+msgstr "変換が完了しました。"
+
+msgctxt "anm2editor"
+msgid "Convert Old Animation Script(*.anm) to New(*.anm2)"
+msgstr "古いアニメーションスクリプト(*.anm) を 新しい形式(*.anm2) へ変換する"
+
+msgctxt "layer"
+msgid "Copy all child layers of to clipboard"
+msgstr "全ての子階層レイヤーをクリップボードにコピー"
+
+msgctxt "layer"
+msgid "Copy entire slider to clipboard"
+msgstr "スライダー全体をクリップボードにコピー"
+
+msgctxt "layer"
+msgid "Copy to clipboard"
+msgstr "クリップボードにコピー"
+
+#, c-format
+msgid ""
+"Current PSD file object:\n"
+"%1$s\n"
+"\n"
+"PSD file to be assigned:\n"
+"%2$s"
+msgstr ""
+"現在の PSD ファイルオブジェクト:\n"
+"%1$s\n"
+"\n"
+"割り当てようとしているPSDファイル:\n"
+"%2$s"
+
+msgctxt "config"
+msgid "Debug"
+msgstr "デバッグ"
+
+msgctxt "anm2editor"
+msgid "Delete"
+msgstr "削除"
+
+msgctxt "script_picker"
+msgid "Deselect All"
+msgstr "すべて解除"
+
+msgctxt "anm2editor"
+msgid "Do you want to continue adding?"
+msgstr "本当に追加しますか？"
+
+msgctxt "anm2editor"
+msgid "Do you want to continue opening this file?"
+msgstr "本当にこのファイルを開きますか？"
+
+msgctxt "anm2editor"
+msgid "Do you want to save changes before closing?"
+msgstr "閉じる前に現在のファイルを保存しますか？"
+
+msgid "Effect \"%1$hs\" not found."
+msgstr "エフェクト \"%1$hs\" が見つかりません。"
+
+msgctxt "config"
+msgid "Enable &debug mode"
+msgstr "デバッグモードを有効にする(&D)"
+
+msgctxt ".ptk.anm2"
+msgid "Exclusive Support"
+msgstr "排他制御サポート"
+
+msgctxt "anm2editor"
+msgid "Exclusive Support Default"
+msgstr "排他制御サポートのデフォルト値"
+
+msgid "Failed to add to PSDToolKit anm2 Editor."
+msgstr "PSDToolKit anm2 エディターへの追加に失敗しました。"
+
+msgid "Failed to assign value to PSDToolKit anm2 Editor."
+msgstr "PSDToolKit anm2 エディターへの値の割り当てに失敗しました。"
+
+msgid "Failed to assign value to effect."
+msgstr "エフェクトへの値の割り当てに失敗しました。"
+
+msgid "Failed to copy to clipboard."
+msgstr "クリップボードへのコピーに失敗しました。"
+
+msgid "Failed to save settings."
+msgstr "設定の保存に失敗しました。"
+
+msgid "Failed to update editing image state."
+msgstr "編集画像の更新に失敗しました。"
+
+msgctxt "layerview"
+msgid "Favorites"
+msgstr "お気に入り"
+
+msgid "GCMZDrops version is too old. PSDToolKit requires GCMZDrops %1$hs or later."
+msgstr "GCMZDrops のバージョンが古すぎます。PSDToolKit には GCMZDrops %1$hs 以降が必要です。"
+
+msgctxt "script_picker"
+msgid "Import"
+msgstr "取り込み"
+
+msgctxt "script_picker"
+msgid "Import Scripts"
+msgstr "スクリプトを取り込み"
+
+msgctxt "anm2editor"
+msgid "Import Scripts from Selected Object in AviUtl"
+msgstr "AviUtl 上で選択されているオブジェクトからスクリプトを取り込む"
+
+msgctxt "anm2editor"
+msgid "Information"
+msgstr "情報"
+
+msgctxt "anm2editor"
+msgid "Label"
+msgstr "ラベル"
+
+msgid "Layer name or value contains forbidden character sequence \"]==]\"."
+msgstr "レイヤー名や値に禁止文字である \"]==]\" が含まれています。"
+
+msgctxt "layerview"
+msgid "Layers"
+msgstr "レイヤー"
+
+msgctxt "anm2editor"
+msgid "New"
+msgstr "新規作成"
+
+msgid "No assignable parameters found in selected selector in anm2 Editor."
+msgstr "anm2 エディターで選択されたセレクター内に割り当てできるパラメーターが見つかりません。"
+
+msgid "No importable scripts found in the selected object."
+msgstr "選択されたオブジェクトにインポート可能なスクリプトが見つかりません。"
+
+msgid "No object is selected. Please select a PSD object in the timeline."
+msgstr "オブジェクトが選択されていません。タイムライン上でPSDオブジェクトを選択してください。"
+
+msgctxt "anm2editor"
+msgid ""
+"Note: This conversion uses simple string replacement and may not work correctly in all cases.\n"
+"Also, this converted script is different from *.ptk.anm2 and cannot be edited in this editor."
+msgstr ""
+"注意: この変換は単純な文字列置換で行っているため、すべてのケースでの動作を保証するものではありません。\n"
+"また、この変換されたスクリプトは *.ptk.anm2 とは異なるため、このエディターで編集することはできません。"
+
+msgid "Note: Uncheck the safeguard checkbox in the PSD object settings to disable this dialog."
+msgstr "メモ: PSDオブジェクトでセーフガードのチェックを外すとこのダイアログは表示されなくなります。"
+
+msgctxt "config"
+msgid "OK"
+msgstr "OK"
+
+msgctxt "anm2editor"
+msgid "Open"
+msgstr "開く"
+
+msgid "Operation failed."
+msgstr "処理に失敗しました。"
+
+msgctxt ".ptk.anm2 label"
+msgid "PSD"
+msgstr "PSD"
+
+msgctxt "anm2editor"
+msgid "PSD File Path"
+msgstr "PSDファイルパス"
+
+msgctxt ".ptk.anm2"
+msgid "PSD Layer Selector for %1$hs"
+msgstr "%1$hs 用PSDレイヤーセレクター"
+
+msgid "PSD file effect not found in the selected object."
+msgstr "選択中のオブジェクトにPSDファイルエフェクトが見つかりません。"
+
+msgid "PSD file path is required to add to PSDToolKit anm2 Editor."
+msgstr "PSDToolKit anm2 エディターに追加するにはPSDファイルパスが必要です。"
+
+msgid "PSDToolKit"
+msgstr "PSDToolKit"
+
+msgctxt "config"
+msgid "PSDToolKit Settings"
+msgstr "PSDToolKit 設定"
+
+msgid "PSDToolKit Settings..."
+msgstr "PSDToolKit 設定..."
+
+msgctxt "anm2editor"
+msgid "PSDToolKit anm2"
+msgstr "PSDToolKit anm2"
+
+msgid "PSDToolKit anm2 Editor"
+msgstr "PSDToolKit anm2 エディター"
+
+msgid "PSDToolKit anm2 Editor is not open."
+msgstr "PSDToolKit anm2 Editor が開いていません。"
+
+msgctxt "anm2editor"
+msgid "Property"
+msgstr "プロパティ"
+
+msgctxt "anm2editor"
+msgid "Redo"
+msgstr "やり直し"
+
+msgctxt "anm2editor"
+msgid "Rename"
+msgstr "名前の変更"
+
+msgctxt "anm2editor"
+msgid "Reverse Items"
+msgstr "アイテムを逆順に並び替える"
+
+msgctxt "anm2editor"
+msgid "Save"
+msgstr "上書き保存"
+
+msgctxt "anm2editor"
+msgid "Save As"
+msgstr "名前をつけて保存"
+
+msgctxt "anm2editor"
+msgid "Save converted *.anm2"
+msgstr "変換された *.anm2 を保存する"
+
+msgctxt "anm2editor"
+msgid "Select *.anm to convert"
+msgstr "変換したい *.anm を選択してください"
+
+msgctxt "script_picker"
+msgid "Select All"
+msgstr "すべて選択"
+
+msgctxt "script_picker"
+msgid "Select scripts to import:"
+msgstr "取り込むスクリプトを選択:"
+
+msgctxt ".ptk.anm2 default name for unnamed selector"
+msgid "Selector"
+msgstr "セレクター"
+
+msgctxt "gui"
+msgid "Send"
+msgstr "送る"
+
+msgctxt "layerview"
+msgid "Simple View"
+msgstr "シンプルV"
+
+msgctxt "anm2editor"
+msgid ""
+"The anm2 Editor is editing a script for a different PSD file.\n"
+"\n"
+"Editor:\n"
+"%1$hs\n"
+"\n"
+"This layer:\n"
+"%2$hs\n"
+"\n"
+"Adding may not work as expected."
+msgstr ""
+"anm2 エディターでは異なるPSDファイル用のスクリプトを編集中です。\n"
+"\n"
+"エディター:\n"
+"%1$hs\n"
+"\n"
+"レイヤー:\n"
+"%2$hs\n"
+"\n"
+"このまま追加しても期待通りに動作しないかもしれません。"
+
+msgid "The file does not appear to be a legacy PSDToolKit anm script."
+msgstr "このファイルは有効な PSDToolKit anm スクリプトではありません。"
+
+msgid "The file does not appear to be a valid PSDToolKit anm2 script."
+msgstr "このファイルは有効な PSDToolKit anm2 スクリプトではありません。"
+
+msgid "The selected object does not have a %1$hs."
+msgstr "選択されたオブジェクトは %1$hs を持っていません。"
+
+msgctxt "script_picker"
+msgid ""
+"These scripts are assigned to a different PSD file.\n"
+"\n"
+"Current Editor: %1$hs\n"
+"Importing From: %2$hs"
+msgstr ""
+"これらのスクリプトは異なるPSDファイルに割り当てられています。\n"
+"\n"
+"現在のエディター: %1$hs\n"
+"取り込み元: %2$hs"
+
+msgctxt "anm2editor"
+msgid "This file appears to have been manually edited. If you continue editing in this editor, the manual changes may be lost."
+msgstr "このファイルは手動で改変された形跡があります。エディターで編集すると変更した部分は失われます。"
+
+msgctxt "config"
+msgid "Trigger Conditions"
+msgstr "発動条件"
+
+msgctxt "anm2editor"
+msgid "Undo"
+msgstr "元に戻す"
+
+msgctxt ".ptk.anm2 default selector name"
+msgid "Unnamed Selector"
+msgstr "無名のセレクター"
+
+msgctxt "anm2editor"
+msgid "Unnamed Selector"
+msgstr "無名のセレクター"
+
+msgctxt "anm2editor"
+msgid "Unsaved"
+msgstr "未保存"
+
+msgctxt "script_picker"
+msgid "Update PSD file path"
+msgstr "PSDファイルパスを更新"
+
+msgctxt "anm2editor"
+msgid "Value"
+msgstr "値"
+
+msgctxt "anm2editor"
+msgid "Welcome to Script Importer!"
+msgstr "スクリプト取り込みツールへようこそ！"
+
+msgctxt "config"
+msgid "When dropping *.object containing only &audio and text on the same frame"
+msgstr "音声とテキストのみを含む*.objectを同一フレームにドロップしたとき(&A)"
+
+msgctxt "config"
+msgid "When dropping *.object containing only a&udio and text on the same frame"
+msgstr "音声とテキストのみを含む*.objectを同一フレームにドロップしたとき(&U)"
+
+msgctxt "config"
+msgid "When dropping *.wav and *.txt files with the same name &together"
+msgstr "同名の*.wavファイルと*.txtファイルを同時にドロップしたとき(&T)"
+
+msgctxt "config"
+msgid "When dropping *.wav and *.txt files with the same name t&ogether"
+msgstr "同名の*.wavファイルと*.txtファイルを同時にドロップしたとき(&O)"
+
+msgctxt "config"
+msgid "When dropping *.wav file while holding &Shift key"
+msgstr "&Shiftキーを押しながら*.wavファイルをドロップしたとき"
+
+msgctxt "config"
+msgid "When dropping files manually:"
+msgstr "手動でファイルをドロップするとき:"
+
+msgctxt "config"
+msgid "When dropping via external API:"
+msgstr "外部API経由でドロップするとき:"
+
+msgid "dialog_ui_font"
+msgstr ""
+"Yu Gothic UI\n"
+"Meiryo UI\n"
+"MS UI Gothic"
+
+msgid "edit section is not available."
+msgstr "エディットセクションがありません。"
+
+msgid "failed to add PSD file."
+msgstr "PSDファイルの追加に失敗しました。"
+
+msgid "failed to create plugin window."
+msgstr "プラグインウィンドウの作成に失敗しました。"
+
+msgid "failed to draw PSD image."
+msgstr "PSD画像の描画に失敗しました。"
+
+msgid "failed to get %1$hs on %2$hs."
+msgstr "%2$hs 上の %1$hs の取得に失敗しました。"
+
+msgid "failed to get alias data from the selected object."
+msgstr "選択中のオブジェクトからエイリアスデータが取得できませんでした。"
+
+msgid "failed to get debug mode."
+msgstr "デバッグモード設定の取得に失敗しました。"
+
+msgid "failed to get drop configuration."
+msgstr "投げ込み設定の取得に失敗しました。"
+
+msgid "failed to get preferred languages."
+msgstr "優先言語設定の取得に失敗しました。"
+
+msgid "failed to load config, continuing with default settings."
+msgstr "設定の読み込みに失敗しました、デフォルト設定で継続します。"
+
+msgid "failed to load language resources, continuing without them."
+msgstr "言語リソースの取得に失敗しました。継続します。"
+
+msgid "failed to read text file."
+msgstr "テキストファイルの読み取りに失敗しました。"
+
+msgid "failed to set %1$hs on %2$hs."
+msgstr "%2$hs 上の %1$hs の書き換えに失敗しました。"
+
+msgid "failed to set PSD properties."
+msgstr "PSD プロパティのセットに失敗しました。"
+
+msgid "failed to show configuration dialog."
+msgstr "設定ダイアログの表示に失敗しました。"
+
+#, c-format
+msgid "file size %1$lld bytes exceeds limit."
+msgstr "ファイルサイズ %1$lld バイトは上限を超過しています。"
+
+msgid "no assignable parameters found in selected object in AviUtl."
+msgstr "AviUtl で選択されたオブジェクト内に割り当てできるパラメーターが見つかりません。"
+
+msgid "no importable scripts found in the selected object."
+msgstr "選択されたオブジェクトにインポート可能なスクリプトが見つかりません。"
+
+msgid "no object is selected in AviUtl ExEdit2."
+msgstr "AviUtl ExEdit2 でオブジェクトが選択されていません。"
+
+msgid "no object is selected in AviUtl."
+msgstr "AviUtl でオブジェクトが選択されていません。"
+
+#. trans: This dagger helps UTF-8 detection. You don't need to translate this.
+msgid "†"
+msgstr ""

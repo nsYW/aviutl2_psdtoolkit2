@@ -1,0 +1,54 @@
+// anm2editor.rc
+// † <-- This dagger helps UTF-8 detection.
+
+#define APSTUDIO_HIDDEN_SYMBOLS
+#include <windows.h>
+#include <commctrl.h>
+#undef APSTUDIO_HIDDEN_SYMBOLS
+#pragma code_page(65001) // UTF-8
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+
+// Resource IDs for toolbar icons
+#define IDB_TOOLBAR_IMPORT 101
+#define IDB_TOOLBAR_NEW 102
+#define IDB_TOOLBAR_OPEN 103
+#define IDB_TOOLBAR_SAVE 104
+#define IDB_TOOLBAR_SAVEAS 105
+#define IDB_TOOLBAR_UNDO 106
+#define IDB_TOOLBAR_REDO 107
+#define IDB_TOOLBAR_CONVERT 108
+
+// PNG resources for toolbar icons
+IDB_TOOLBAR_IMPORT PNG "../img/icons/convert_to_text_128dp_333_FILL1_wght700_GRAD200_opsz48.png"
+IDB_TOOLBAR_NEW PNG "../img/icons/draft_128dp_333_FILL1_wght700_GRAD200_opsz48.png"
+IDB_TOOLBAR_OPEN PNG "../img/icons/folder_open_128dp_333_FILL1_wght700_GRAD200_opsz48.png"
+IDB_TOOLBAR_SAVE PNG "../img/icons/save_128dp_333_FILL1_wght700_GRAD200_opsz48.png"
+IDB_TOOLBAR_SAVEAS PNG "../img/icons/save_as_128dp_333_FILL1_wght700_GRAD200_opsz48.png"
+IDB_TOOLBAR_UNDO PNG "../img/icons/undo_128dp_333_FILL1_wght700_GRAD200_opsz48.png"
+IDB_TOOLBAR_REDO PNG "../img/icons/redo_128dp_333_FILL1_wght700_GRAD200_opsz48.png"
+IDB_TOOLBAR_CONVERT PNG "../img/icons/text_compare_128dp_333_FILL1_wght700_GRAD0_opsz48.png"
+
+#ifdef APSTUDIO_INVOKED
+
+1 TEXTINCLUDE
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE
+BEGIN
+    "#define APSTUDIO_HIDDEN_SYMBOLS\r\n"
+    "#include <windows.h>\r\n"
+    "#include <commctrl.h>\r\n"
+    "#undef APSTUDIO_HIDDEN_SYMBOLS\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
