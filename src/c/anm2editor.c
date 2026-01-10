@@ -3168,7 +3168,7 @@ cleanup:
   if (!success) {
     struct ov_error end_err = {0};
     if (!ptk_anm2_end_transaction(editor->doc, &end_err)) {
-      ptk_logf_error(&end_err, "%1$hs", "%1$hs", gettext("failed to end transaction in error recovery"));
+      ptk_logf_error(&end_err, "%1$hs", "%1$hs", gettext("failed to end transaction in error recovery."));
       OV_ERROR_DESTROY(&end_err);
     }
   }
@@ -4046,7 +4046,7 @@ cleanup:
   if (!success) {
     struct ov_error end_err = {0};
     if (!ptk_anm2_end_transaction(editor->doc, &end_err)) {
-      ptk_logf_error(&end_err, "%1$hs", "%1$hs", gettext("failed to end transaction in error recovery"));
+      ptk_logf_error(&end_err, "%1$hs", "%1$hs", gettext("failed to end transaction in error recovery."));
       OV_ERROR_DESTROY(&end_err);
     }
   }

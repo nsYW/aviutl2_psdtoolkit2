@@ -504,6 +504,9 @@ msgstr "PSDファイルの追加に失敗しました。"
 msgid "failed to draw PSD image."
 msgstr "PSD画像の描画に失敗しました。"
 
+msgid "failed to end transaction in error recovery."
+msgstr "エラーからのリカバリー中にトランザクションを閉じるのに失敗しました。"
+
 msgid "failed to get %1$hs on %2$hs."
 msgstr "%2$hs 上の %1$hs の取得に失敗しました。"
 
