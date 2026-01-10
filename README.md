@@ -164,6 +164,11 @@ PSDファイルに対応した `*.anm` を作ったとき、このスクリプ�
 
 あるいは名前じゃなく `L10` みたいに L+数字 を書くと、そのレイヤーにあるオブジェクトが対象になります。
 
+Contributors
+------------
+
+- Nsyw - Simplified Chinese translation
+
 Credits
 -------
 
