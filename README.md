@@ -9,7 +9,15 @@ AviUtl ExEdit2 で PSD ファイルを扱うためのプラグインです。
 
 更新履歴は CHANGELOG を参照してください。
 
-https://github.com/oov/aviutl2_psdtoolkit2/blob/master/CHANGELOG.md
+https://github.com/oov/aviutl2_psdtoolkit2/blob/main/CHANGELOG.md
+
+注意事項
+--------
+
+PSDToolKit は無保証で提供されます。  
+PSDToolKit を使用したこと及び使用しなかったことによるいかなる損害について、開発者は責任を負いません。
+
+これに同意できない場合、あなたは PSDToolKit を使用することができません。
 
 現在の状態について
 ------------------
@@ -53,15 +61,6 @@ https://github.com/oov/aviutl2_psdtoolkit2/blob/master/CHANGELOG.md
 右クリックメニューに登録されるデフォルト位置がちょっと変かも。
 
 自動折り返しとかキャッシュ機能とかは今のところありません。
-
-
-注意事項
---------
-
-PSDToolKit は無保証で提供されます。  
-PSDToolKit を使用したこと及び使用しなかったことによるいかなる損害について、開発者は責任を負いません。
-
-これに同意できない場合、あなたは PSDToolKit を使用することができません。
 
 使い方
 ------
