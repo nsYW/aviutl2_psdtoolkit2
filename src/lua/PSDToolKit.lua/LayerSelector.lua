@@ -85,9 +85,9 @@ function LayerSelector.new(values, selected, opts)
 	opts = opts or {}
 
 	-- Validate and clamp selected index
-	local sel = selected or 1
-	if sel < 1 then
-		sel = 1
+	local sel = selected or 0
+	if sel < 0 then
+		sel = 0
 	elseif sel > #values then
 		sel = #values
 	end

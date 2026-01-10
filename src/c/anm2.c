@@ -614,6 +614,12 @@ generate_script_content(struct ptk_anm2 const *const doc, char **const content, 
         goto cleanup;
       }
 
+      // Insert a "(None)" option as the first item for selectors
+      if (!ov_sprintf_append_char(&body, err, "%1$hs", ",%1$hs=0", pgettext(".ptk.anm2 Unselected item name for selector", "(None)"))) {
+        OV_ERROR_ADD_TRACE(err);
+        goto cleanup;
+      }
+
       for (size_t j = 0; j < items_len; j++) {
         struct item const *const item = &sel->items[j];
         // Use name for all items; for animation items, use script_name if name is not set
