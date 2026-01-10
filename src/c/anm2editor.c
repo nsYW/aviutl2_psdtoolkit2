@@ -4932,7 +4932,7 @@ bool ptk_anm2editor_save_as(struct ptk_anm2editor *editor, struct ov_error *err)
     }
   }
 
-  if (!ptk_anm2editor_save(editor, err)) {
+  if (!ptk_anm2_save(editor->doc, selected_path, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
@@ -4942,6 +4942,10 @@ bool ptk_anm2editor_save_as(struct ptk_anm2editor *editor, struct ov_error *err)
   }
   editor->file_path = selected_path;
   selected_path = NULL;
+
+  editor->modified = false;
+  update_window_title(editor);
+
   success = true;
 
 cleanup:
