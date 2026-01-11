@@ -3434,9 +3434,9 @@ cleanup:
   }
 }
 
-// Context for import scripts callback
-struct import_scripts_context {
-  struct ptk_anm2editor *editor;
+// Context for getting alias from edit section
+struct get_alias_context {
+  char *alias; // output: copied alias string (caller must free with OV_ARRAY_DESTROY)
   struct ov_error *err;
   bool success;
 };
@@ -3571,19 +3571,13 @@ cleanup:
   return success;
 }
 
-// Callback for call_edit_section_param - runs in edit section context
-static void import_scripts_callback(void *param, struct aviutl2_edit_section *edit) {
-  struct import_scripts_context *ctx = (struct import_scripts_context *)param;
-  struct ptk_anm2editor *editor = ctx->editor;
+static void get_alias_callback(void *param, struct aviutl2_edit_section *edit) {
+  struct get_alias_context *ctx = (struct get_alias_context *)param;
   struct ov_error *err = ctx->err;
-
-  struct ptk_alias_script_definitions defs = {0};
-  struct ptk_alias_available_scripts scripts = {0};
   char const *alias = NULL;
-  aviutl2_object_handle obj = NULL;
 
   // Get the currently focused object
-  obj = edit->get_focus_object();
+  aviutl2_object_handle obj = edit->get_focus_object();
   if (!obj) {
     OV_ERROR_SET(err,
                  ov_error_type_generic,
@@ -3602,25 +3596,122 @@ static void import_scripts_callback(void *param, struct aviutl2_edit_section *ed
     goto cleanup;
   }
 
-  // Load script definitions from INI
-  if (!ptk_alias_load_script_definitions(&defs, err)) {
+  // Copy alias string since it's only valid within edit section
+  {
+    size_t const len = strlen(alias);
+    if (!OV_ARRAY_GROW(&ctx->alias, len + 1)) {
+      OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
+      goto cleanup;
+    }
+    memcpy(ctx->alias, alias, len + 1);
+    OV_ARRAY_SET_LENGTH(ctx->alias, len + 1);
+  }
+
+  ctx->success = true;
+
+cleanup:;
+}
+
+static bool compare_psd_paths(char const *path1, char const *path2) {
+  if (!path1 || path1[0] == '\0') {
+    return !path2 || path2[0] == '\0';
+  }
+  if (!path2 || path2[0] == '\0') {
+    return false;
+  }
+  return strcmp(path1, path2) == 0;
+}
+
+static bool execute_import_scripts_with_transaction(struct ptk_anm2editor *const editor,
+                                                    char const *const alias,
+                                                    struct ptk_alias_available_scripts *const scripts,
+                                                    bool const has_selected,
+                                                    bool const update_psd_path,
+                                                    struct ov_error *const err) {
+  bool success = false;
+  bool transaction_started = false;
+
+  if (!ptk_anm2_begin_transaction(editor->doc, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
+  transaction_started = true;
 
-  // Enumerate available scripts from the alias
-  if (!ptk_alias_enumerate_available_scripts(alias, strlen(alias), &defs, &scripts, err)) {
+  if (!import_scripts_execute_transaction(editor, alias, scripts, has_selected, update_psd_path, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
+  success = true;
 
-  // Check if there are any scripts to import
+cleanup:
+  if (transaction_started) {
+    if (!ptk_anm2_end_transaction(editor->doc, success ? err : NULL)) {
+      if (success) {
+        OV_ERROR_ADD_TRACE(err);
+      }
+    }
+  }
+  return success;
+}
+
+// Command handler for ID_EDIT_IMPORT_SCRIPTS
+static void handle_cmd_import_scripts(struct ptk_anm2editor *editor) {
+  if (!editor || !editor->edit) {
+    return;
+  }
+
+  struct ov_error err = {0};
+  struct get_alias_context alias_ctx = {
+      .err = &err,
+      .success = false,
+  };
+  struct ptk_alias_script_definitions defs = {0};
+  struct ptk_alias_available_scripts scripts = {0};
+  bool success = false;
+  if (!editor->edit->call_edit_section_param(&alias_ctx, get_alias_callback)) {
+    OV_ERROR_SET(&err, ov_error_type_generic, ov_error_generic_fail, gettext("edit section is not available."));
+    goto cleanup;
+  }
+  if (!alias_ctx.success) {
+    OV_ERROR_ADD_TRACE(&err);
+    goto cleanup;
+  }
+  if (!ptk_alias_load_script_definitions(&defs, &err)) {
+    OV_ERROR_ADD_TRACE(&err);
+    goto cleanup;
+  }
+  if (!ptk_alias_enumerate_available_scripts(alias_ctx.alias, strlen(alias_ctx.alias), &defs, &scripts, &err)) {
+    OV_ERROR_ADD_TRACE(&err);
+    goto cleanup;
+  }
   if (OV_ARRAY_LENGTH(scripts.items) == 0) {
-    OV_ERROR_SET(err,
+    OV_ERROR_SET(&err,
                  ov_error_type_generic,
                  ptk_alias_error_no_scripts,
                  gettext("no importable scripts found in the selected object."));
     goto cleanup;
+  }
+
+  // Check if we can skip the dialog:
+  // - Only one script available
+  // - PSD paths match (no path update needed)
+  {
+    char const *const current_psd_path = ptk_anm2editor_get_psd_path(editor);
+    bool const psd_paths_match = compare_psd_paths(current_psd_path, scripts.psd_path);
+    bool const can_skip_dialog = (OV_ARRAY_LENGTH(scripts.items) == 1) && psd_paths_match;
+
+    if (can_skip_dialog) {
+      // Auto-select the only script and import without dialog
+      scripts.items[0].selected = true;
+
+      if (!execute_import_scripts_with_transaction(editor, alias_ctx.alias, &scripts, true, false, &err)) {
+        OV_ERROR_ADD_TRACE(&err);
+        goto cleanup;
+      }
+
+      success = true;
+      goto cleanup;
+    }
   }
 
   // Show script picker dialog and execute import
@@ -3634,15 +3725,15 @@ static void import_scripts_callback(void *param, struct aviutl2_edit_section *ed
     };
 
     HWND *disabled_windows = ptk_win32_disable_family_windows(editor->window);
-    ov_tribool const result = ptk_script_picker_show(editor->window, &picker_params, err);
+    ov_tribool const result = ptk_script_picker_show(editor->window, &picker_params, &err);
     ptk_win32_restore_disabled_family_windows(disabled_windows);
 
     if (result == ov_false) {
-      ctx->success = true;
+      success = true;
       goto cleanup;
     }
     if (result == ov_indeterminate) {
-      OV_ERROR_ADD_TRACE(err);
+      OV_ERROR_ADD_TRACE(&err);
       goto cleanup;
     }
 
@@ -3655,56 +3746,26 @@ static void import_scripts_callback(void *param, struct aviutl2_edit_section *ed
       }
     }
     if (!has_selected && !picker_params.update_psd_path) {
-      ctx->success = true;
+      success = true;
       goto cleanup;
     }
 
-    if (!ptk_anm2_begin_transaction(editor->doc, err)) {
-      OV_ERROR_ADD_TRACE(err);
-      goto cleanup;
-    }
-    bool const transaction_success =
-        import_scripts_execute_transaction(editor, alias, &scripts, has_selected, picker_params.update_psd_path, err);
-    if (!ptk_anm2_end_transaction(editor->doc, transaction_success ? err : NULL)) {
-      if (transaction_success) {
-        OV_ERROR_ADD_TRACE(err);
-      }
-      goto cleanup;
-    }
-
-    if (!transaction_success) {
+    if (!execute_import_scripts_with_transaction(
+            editor, alias_ctx.alias, &scripts, has_selected, picker_params.update_psd_path, &err)) {
+      OV_ERROR_ADD_TRACE(&err);
       goto cleanup;
     }
   }
 
-  ctx->success = true;
+  success = true;
 
 cleanup:
   ptk_alias_available_scripts_free(&scripts);
   ptk_alias_script_definitions_free(&defs);
-}
-
-// Command handler for ID_EDIT_IMPORT_SCRIPTS
-static void handle_cmd_import_scripts(struct ptk_anm2editor *editor) {
-  if (!editor || !editor->edit) {
-    return;
+  if (alias_ctx.alias) {
+    OV_ARRAY_DESTROY(&alias_ctx.alias);
   }
-
-  struct ov_error err = {0};
-  struct import_scripts_context ctx = {
-      .editor = editor,
-      .err = &err,
-      .success = false,
-  };
-
-  // Call the edit section to access the focused object
-  if (!editor->edit->call_edit_section_param(&ctx, import_scripts_callback)) {
-    OV_ERROR_SET(&err, ov_error_type_generic, ov_error_generic_fail, gettext("edit section is not available."));
-    goto cleanup;
-  }
-
-cleanup:
-  if (!ctx.success) {
+  if (!success) {
     // Check if this is a "how to use" error that needs a hint
     if (ov_error_is(&err, ov_error_type_generic, ptk_alias_error_psd_not_found) ||
         ov_error_is(&err, ov_error_type_generic, ptk_alias_error_no_scripts) ||
