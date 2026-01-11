@@ -17,7 +17,6 @@ SKIP_TESTS=0
 CREATE_DOCS=0
 CREATE_ZIP=0
 CREATE_INSTALLER=0
-SIGN_INI=0
 CMAKE_BUILD_TYPE=Release
 ARCHS="x86_64"
 USE_ADDRESS_SANITIZER=OFF
@@ -46,10 +45,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     -i|--installer)
       CREATE_INSTALLER=1
-      shift
-      ;;
-    sign-ini)
-      SIGN_INI=1
       shift
       ;;
     --asan)
@@ -186,8 +181,8 @@ show_test_log() {
   fi
 }
 
-# Skip normal build process if only sign-ini or installer is requested
-if [ "${SIGN_INI}" -eq 0 ] && [ "${CREATE_INSTALLER}" -eq 0 ] || [ "${CREATE_ZIP}" -eq 1 ]; then
+# Skip normal build process if only installer is requested
+if [ "${CREATE_INSTALLER}" -eq 0 ] || [ "${CREATE_ZIP}" -eq 1 ]; then
   for arch in $ARCHS; do
     builddir="${PWD}/build/${CMAKE_BUILD_TYPE}/${arch}"
     build_log="${builddir}/build.log"
@@ -272,6 +267,7 @@ if [ "${CREATE_INSTALLER}" -eq 1 ]; then
   for path in \
     "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
     "/c/Program Files/Inno Setup 6/ISCC.exe" \
+    "${USERPROFILE}/AppData/Local/Programs/Inno Setup 6/ISCC.exe" \
     "$(command -v iscc 2>/dev/null || true)"; do
     if [ -f "$path" ]; then
       ISCC_PATH="$path"
