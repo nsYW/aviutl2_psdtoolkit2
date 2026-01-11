@@ -166,13 +166,13 @@ BOOL __declspec(dllexport) InitializePlugin(DWORD version) {
   bool success = false;
 
   // Check minimum required AviUtl ExEdit2 version
-  if (version < 2002700) {
+  if (version < 2002800) {
     OV_ERROR_SETF(&err,
                   ov_error_type_generic,
                   ov_error_generic_fail,
                   "%1$s",
                   gettext("PSDToolKit requires AviUtl ExEdit2 %1$s or later."),
-                  "version2.0beta27");
+                  "version2.0beta28");
     OV_ERROR_ADD_TRACE(&err);
     goto cleanup;
   }

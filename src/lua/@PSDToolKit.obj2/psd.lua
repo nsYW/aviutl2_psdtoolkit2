@@ -21,5 +21,5 @@ require("PSDToolKit").psdcall(function()
 		offsetx = x,
 		offsety = y,
 	}, obj)
-	obj.load("framebuffer", 0, 0, 1, 1, false)
+	obj.clearbuffer("object", 1, 1)
 end)
