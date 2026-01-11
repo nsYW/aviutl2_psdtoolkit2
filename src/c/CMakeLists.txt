@@ -461,3 +461,23 @@ foreach(alias_file IN LISTS ALIAS_FILES)
   list(APPEND COPY_ALIAS_OUTPUTS "${dest_path}")
 endforeach()
 add_custom_target(${PROJECT_NAME}_copy_alias ALL DEPENDS ${COPY_ALIAS_OUTPUTS})
+
+# Copy *.aul2 files to Language directory
+set(AUL2_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../aul2")
+set(AUL2_DEST_DIR "${EXPORT_DIR}/Language")
+set(AUL2_FILES
+  "English.PSDToolKit.aul2"
+  "简体中文.PSDToolKit.aul2"
+)
+foreach(aul2_file IN LISTS AUL2_FILES)
+  set(src_path "${AUL2_SRC_DIR}/${aul2_file}")
+  set(dest_path "${AUL2_DEST_DIR}/${aul2_file}")
+  add_custom_command(
+    OUTPUT "${dest_path}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${AUL2_DEST_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy "${src_path}" "${dest_path}"
+    DEPENDS "${src_path}"
+  )
+  list(APPEND COPY_AUL2_OUTPUTS "${dest_path}")
+endforeach()
+add_custom_target(${PROJECT_NAME}_copy_aul2 ALL DEPENDS ${COPY_AUL2_OUTPUTS})
