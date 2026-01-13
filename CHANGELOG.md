@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- スクリプト名の多言語化で漏れがあったのを修正
+- PSDToolKit ウィンドウをDPIスケーリングに対応
+- PSDToolKit ウィンドウにスプリッターを追加
+- シーンチェンジでPSDファイルオブジェクトが正しく動作しなかったのを修正
+
 ## 2.0.0alpha5 2026-01-12
 
 - AviUtl ExEdit2 version 2.0beta28 以降が必要です
