@@ -65,6 +65,11 @@ type GUI struct {
 	lastDPI    uint32
 	symbolFont []byte
 
+	sidePaneWidthDip      float32
+	splitterDragging      bool
+	splitterStartMouseX   int32
+	splitterStartWidthDip float32
+
 	SendEditingImageState func(path, state string) error
 	ExportFaviewSlider    func(path, sliderName string, names, values []string, selectedIndex int) error
 	ExportLayerNames      func(path string, names, values []string, selectedIndex int) error
@@ -79,6 +84,8 @@ func New(ed *editing.Editing) *GUI {
 		ready:      make(chan struct{}),
 		editing:    ed,
 		thumbCache: NewThumbnailCache(),
+
+		sidePaneWidthDip: 360,
 	}
 
 	// Set up change notification
@@ -300,7 +307,27 @@ func (g *GUI) update() {
 	width, height := g.window.GetSize()
 	scale := g.uiScale()
 	p := float32(2) * scale
-	sidePaneWidth := float32(360) * scale
+	splitterWidth := float32(6) * scale
+
+	sidePaneWidthDip := g.sidePaneWidthDip
+	if sidePaneWidthDip <= 0 {
+		sidePaneWidthDip = 360
+	}
+	minSideDip := float32(160)
+	minMainDip := float32(240)
+	maxSideDip := float32(width)/scale - minMainDip - splitterWidth/scale
+	if maxSideDip < minSideDip {
+		maxSideDip = minSideDip
+	}
+	if sidePaneWidthDip < minSideDip {
+		sidePaneWidthDip = minSideDip
+	}
+	if sidePaneWidthDip > maxSideDip {
+		sidePaneWidthDip = maxSideDip
+	}
+	g.sidePaneWidthDip = sidePaneWidthDip
+
+	sidePaneWidth := sidePaneWidthDip * scale
 	topPaneHeight := float32(28) * scale
 	closeButtonWidth := float32(28) * scale
 	sideTabPaneWidth := float32(64) * scale
@@ -314,7 +341,7 @@ func (g *GUI) update() {
 	nk.NkStylePushVec2(ctx, nkhelper.GetStyleWindowGroupPaddingPtr(ctx), nk.NkVec2(0, 0))
 
 	if nk.NkBegin(ctx, "MainWindow", nk.NkRect(0, 0, float32(width), float32(height)), nk.WindowNoScrollbar) != 0 {
-		nk.NkLayoutRowBegin(ctx, nk.Static, float32(height)-p, 2)
+		nk.NkLayoutRowBegin(ctx, nk.Static, float32(height)-p, 3)
 
 		nk.NkLayoutRowPush(ctx, sidePaneWidth-p)
 		if nk.NkGroupBegin(ctx, "UIPane", nk.WindowNoScrollbar) != 0 {
@@ -372,7 +399,46 @@ func (g *GUI) update() {
 			nk.NkGroupEnd(ctx)
 		}
 
-		nk.NkLayoutRowPush(ctx, float32(width)-sidePaneWidth-p)
+		nk.NkLayoutRowPush(ctx, splitterWidth)
+		{
+			var rect nk.Rect
+			hasWidget := nk.NkWidget(&rect, ctx) != 0
+			hovered := hasWidget && nk.NkInputIsMouseHoveringRect(ctx.Input(), rect) != 0
+			if hasWidget {
+				canvas := nk.NkWindowGetCanvas(ctx)
+				var col nk.Color
+				if g.splitterDragging || hovered {
+					col.SetA(48)
+				} else {
+					col.SetA(24)
+				}
+				nk.NkFillRect(canvas, rect, 0, col)
+			}
+			if hovered && nk.NkInputIsMousePressed(ctx.Input(), nk.ButtonLeft) != 0 {
+				g.splitterDragging = true
+				mx, _ := ctx.Input().Mouse().Pos()
+				g.splitterStartMouseX = mx
+				g.splitterStartWidthDip = g.sidePaneWidthDip
+			}
+			if g.splitterDragging {
+				if nk.NkInputIsMouseDown(ctx.Input(), nk.ButtonLeft) != 0 {
+					mx, _ := ctx.Input().Mouse().Pos()
+					delta := float32(mx-g.splitterStartMouseX) / scale
+					w := g.splitterStartWidthDip + delta
+					if w < minSideDip {
+						w = minSideDip
+					}
+					if w > maxSideDip {
+						w = maxSideDip
+					}
+					g.sidePaneWidthDip = w
+				} else {
+					g.splitterDragging = false
+				}
+			}
+		}
+
+		nk.NkLayoutRowPush(ctx, float32(width)-sidePaneWidth-splitterWidth-p)
 		if nk.NkGroupBegin(ctx, "MainPane", nk.WindowNoScrollbar) != 0 {
 			if g.img != nil {
 				rgn := nk.NkWindowGetContentRegion(ctx)
