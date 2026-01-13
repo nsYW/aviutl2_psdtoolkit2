@@ -34,10 +34,15 @@ local last_cache_index = nil
 -- Resets per-frame state and initializes the module for the current frame.
 function M.new_frame()
 	FrameState.clear()
-	CurrentPSD.clear()
-	VoiceStates:clear()
-	OverwriterStates:clear()
-	SubObjectStates:clear()
+
+	-- Clean up old frames based on recent access tracking
+	local frames_to_cleanup = FrameState.get_frames_to_cleanup()
+	for _, frame in ipairs(frames_to_cleanup) do
+		CurrentPSD.cleanup_frame(frame)
+		VoiceStates:cleanup_frame(frame)
+		OverwriterStates:cleanup_frame(frame)
+		SubObjectStates:cleanup_frame(frame)
+	end
 
 	local ptk = obj.module("PSDToolKit")
 	if not ptk then
@@ -46,12 +51,17 @@ function M.new_frame()
 	local debug_mode, cache_index = ptk.get_debug_mode()
 	debug.set_debug(debug_mode)
 
-	-- Clear caches when cache_index changes (project load or cache clear)
+	-- Clear ALL caches when cache_index changes (project load or cache clear)
 	if last_cache_index ~= cache_index then
 		ValueCache.clear()
 		LabFile.clear()
 		LipSync.clear()
 		LipSyncLab.clear()
+		CurrentPSD.clear_all()
+		VoiceStates:clear_all()
+		OverwriterStates:clear_all()
+		SubObjectStates:clear_all()
+		FrameState.clear_all_frames()
 		last_cache_index = cache_index
 		dbg("PSDToolKit: cache cleared (cache_index=%d)", cache_index)
 	end

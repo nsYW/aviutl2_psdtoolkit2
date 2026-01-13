@@ -1,22 +1,31 @@
 --- OverwriterStates for PSDToolKit
 -- Manages layer selector overwriter storage and retrieval by character ID or layer number.
+-- States are organized by frame number to support multi-frame state management.
 local CharacterID = require("PSDToolKit.CharacterID")
+local FrameState = require("PSDToolKit.FrameState")
 
 local OverwriterStates = {}
 OverwriterStates.__index = OverwriterStates
 
 function OverwriterStates.new()
 	return setmetatable({
-		states = {},
+		states = {}, -- frame_number -> {id_key -> values}
 	}, OverwriterStates)
 end
 
---- Clears all overwriter states.
-function OverwriterStates:clear()
+--- Clears overwriter states for a specific frame.
+-- @param frame_number number: The frame number to clean up
+function OverwriterStates:cleanup_frame(frame_number)
+	self.states[frame_number] = nil
+end
+
+--- Clears all overwriter states (for cache invalidation).
+function OverwriterStates:clear_all()
 	self.states = {}
 end
 
 --- Merge values into existing state or create new state.
+-- @param states table: The states table for the current frame
 -- @param key string: The state key
 -- @param values table: The overwriter values table {p1=number, p2=number, ...}
 local function merge_values(states, key, values)
@@ -43,8 +52,16 @@ end
 -- @param layer number: The layer number.
 -- @param values table: The overwriter values table {p1=number, p2=number, ...}
 function OverwriterStates:set(id, layer, values)
+	local frame = FrameState.get_current_frame()
+	FrameState.track_frame_access(frame)
+
+	if not self.states[frame] then
+		self.states[frame] = {}
+	end
+
+	local frame_states = self.states[frame]
 	CharacterID.set_callback(id, layer, function(key)
-		merge_values(self.states, key, values)
+		merge_values(frame_states, key, values)
 	end)
 end
 
@@ -53,7 +70,12 @@ end
 -- @param id string: The character identifier or layer specifier (e.g., "L1").
 -- @return table|nil: The overwriter values table, or nil if not found.
 function OverwriterStates:get(id)
-	return CharacterID.get(self.states, id)
+	local frame = FrameState.get_current_frame()
+	local frame_states = self.states[frame]
+	if not frame_states then
+		return nil
+	end
+	return CharacterID.get(frame_states, id)
 end
 
 local singleton = OverwriterStates.new()
