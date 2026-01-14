@@ -120,6 +120,26 @@ local function validate(pat)
 	return true
 end
 
+local consonant_mode_map = {
+	["閉じる"] = 0,
+	["前を継続"] = 1,
+	["前後で補間"] = 2,
+	["調音位置"] = 3,
+}
+local function normalize_consonant_mode(v)
+	if type(v) == "number" then
+		return v
+	end
+	if type(v) == "string" then
+		local n = tonumber(v)
+		if n ~= nil then
+			return n
+		end
+		return consonant_mode_map[v]
+	end
+	return nil
+end
+
 --- Create a new LipSyncLab object from legacy parameters.
 -- This function is called from converted anm scripts.
 -- @param pat table: Vowel patterns {a=string, i=string, u=string, e=string, o=string, N=string}
@@ -179,8 +199,8 @@ function LipSyncLab.new(opts)
 	pat.E = pat.e
 	pat.O = pat.o
 
-	-- Parse numeric parameters (stored as strings)
-	local mode = tonumber(opts["子音処理"]) or 0
+	-- Parse parameters ("子音処理" may come as number, numeric string, or caption)
+	local mode = normalize_consonant_mode(opts["子音処理"]) or 0
 
 	-- Convert alwaysapply to boolean (stored as "0" or "1")
 	local alwaysapply_val = tonumber(opts["発声がなくても有効"]) or 0
