@@ -1,5 +1,6 @@
 --- CurrentPSD - Current PSD instance management (singleton)
 -- Manages the current PSD object being processed in the current frame.
+-- States are organized by frame number to support multi-frame state management.
 -- Provides functions to initialize, draw, and add states to the current PSD.
 local CurrentPSD = {}
 
@@ -11,23 +12,31 @@ local PSD = require("PSDToolKit.PSD")
 local LayerSelector = require("PSDToolKit.LayerSelector")
 local ValueCache = require("PSDToolKit.ValueCache")
 
-local current = nil
+local currents = {} -- frame_number -> psd
 
---- Clear the current PSD reference.
--- Called at the beginning of each frame processing.
-function CurrentPSD.clear()
-	current = nil
+--- Clear the PSD reference for a specific frame.
+-- @param frame_number number: The frame number to clean up
+function CurrentPSD.cleanup_frame(frame_number)
+	currents[frame_number] = nil
+end
+
+--- Clear all PSD references (for cache invalidation).
+function CurrentPSD.clear_all()
+	currents = {}
 end
 
 --- Get the current PSD object.
 -- @return PSD|nil: The current PSD object, or nil if not initialized
 function CurrentPSD.get()
-	return current
+	local frame = FrameState.get_current_frame()
+	return currents[frame]
 end
 
 --- Get the current PSD object, or error if not initialized.
 -- @return PSD: The current PSD object
 function CurrentPSD.require()
+	local frame = FrameState.get_current_frame()
+	local current = currents[frame]
 	if not current then
 		error(i18n({
 			ja_JP = "PSDが初期化されていません。init_psdを先に呼び出してください。",
@@ -88,8 +97,10 @@ function CurrentPSD.init(opts, obj)
 		tostring(opts.character_id)
 	)
 
-	-- Store reference
-	current = psd
+	-- Store reference for current frame
+	local frame = FrameState.get_current_frame()
+	FrameState.track_frame_access(frame)
+	currents[frame] = psd
 
 	return psd
 end
@@ -100,6 +111,8 @@ function CurrentPSD.draw(obj)
 	if FrameState.has_error() then
 		return
 	end
+	local frame = FrameState.get_current_frame()
+	local current = currents[frame]
 	if not current then
 		error(i18n({
 			ja_JP = "「PSDファイル@PSDToolKit」が配置されていません。",

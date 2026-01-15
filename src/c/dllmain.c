@@ -38,6 +38,7 @@
 #include "cache.h"
 #include "error.h"
 #include "input.h"
+#include "ipc.h"
 #include "layer.h"
 #include "logf.h"
 #include "psdtoolkit.h"
@@ -68,10 +69,33 @@ static int g_cache_index = 0;
  * to invalidate all cached data and notify Lua side.
  */
 static void update_cache_index(void) {
+  if (g_cache_index < 0) {
+    return;
+  }
   ++g_cache_index;
   if (g_cache) {
     ptk_cache_clear(g_cache);
   }
+}
+
+/**
+ * @brief Find aviutl2Manager window
+ *
+ * @return found window handle on success, desktop window handle on failure
+ */
+static HWND find_manager_window(void) {
+  static wchar_t const class_name[] = L"aviutl2Manager";
+  DWORD const pid = GetCurrentProcessId();
+  HWND h = NULL;
+  DWORD wpid;
+  while ((h = FindWindowExW(NULL, h, class_name, NULL)) != NULL) {
+    GetWindowThreadProcessId(h, &wpid);
+    if (wpid != pid) {
+      continue;
+    }
+    return h;
+  }
+  return GetDesktopWindow();
 }
 
 /**
@@ -165,6 +189,8 @@ BOOL __declspec(dllexport) InitializePlugin(DWORD version) {
   void *dll_hinst = NULL;
   bool success = false;
 
+  g_cache_index = 0;
+
   // Check minimum required AviUtl ExEdit2 version
   if (version < 2002800) {
     OV_ERROR_SETF(&err,
@@ -213,6 +239,42 @@ BOOL __declspec(dllexport) InitializePlugin(DWORD version) {
 
 cleanup:
   if (!success) {
+    wchar_t main_instruction[256];
+    wchar_t content[1024];
+    wchar_t const *content_ptr = NULL;
+
+    // Check for specific IPC errors and provide user-friendly hints
+    if (ov_error_is(&err, ov_error_type_generic, ptk_ipc_error_target_not_found)) {
+      ov_snprintf_wchar(content,
+                        sizeof(content) / sizeof(content[0]),
+                        L"%1$hs",
+                        L"%1$hs",
+                        gettext("PSDToolKit.exe was not found.\n\n"
+                                "The installation files may be corrupted.\n"
+                                "Please try reinstalling PSDToolKit."));
+      content_ptr = content;
+    } else if (ov_error_is(&err, ov_error_type_generic, ptk_ipc_error_target_access_denied)) {
+      ov_snprintf_wchar(content,
+                        sizeof(content) / sizeof(content[0]),
+                        L"%1$hs",
+                        L"%1$hs",
+                        gettext("Access to PSDToolKit.exe was denied.\n\n"
+                                "This error may be caused by antivirus software\n"
+                                "blocking the execution of PSDToolKit.exe.\n\n"
+                                "Please check if your antivirus software is blocking the program."));
+      content_ptr = content;
+    }
+
+    ov_snprintf_wchar(main_instruction,
+                      sizeof(main_instruction) / sizeof(main_instruction[0]),
+                      L"%1$hs",
+                      L"%1$hs",
+                      gettext("failed to initialize plugin."));
+    ptk_error_dialog(
+        find_manager_window(), &err, L"PSDToolKit", main_instruction, content_ptr, TD_ERROR_ICON, TDCBF_OK_BUTTON);
+    OV_ERROR_DESTROY(&err);
+
+    g_cache_index = -1;
     if (g_input) {
       ptk_input_destroy(&g_input);
     }
@@ -226,8 +288,6 @@ cleanup:
       mo_set_default(NULL);
       mo_free(&g_mo);
     }
-    ptk_logf_error(&err, "%1$hs", "%1$hs", gettext("failed to initialize plugin."));
-    OV_ERROR_DESTROY(&err);
     return FALSE;
   }
   return TRUE;
@@ -235,6 +295,7 @@ cleanup:
 
 void __declspec(dllexport) UninitializePlugin(void);
 void __declspec(dllexport) UninitializePlugin(void) {
+  g_cache_index = -1;
   if (g_msg_hook) {
     UnhookWindowsHookEx(g_msg_hook);
     g_msg_hook = NULL;
@@ -283,6 +344,11 @@ static void config_menu_handler(HWND const hwnd, HINSTANCE const dll_hinst) {
 }
 
 static void script_module_get_debug_mode(struct aviutl2_script_module_param *param) {
+  if (!g_script_module) {
+    param->push_result_boolean(false);
+    param->push_result_int(g_cache_index);
+    return;
+  }
   ptk_script_module_get_debug_mode(g_script_module, param, g_cache_index);
 }
 static void script_module_generate_tag(struct aviutl2_script_module_param *param) {
@@ -515,7 +581,15 @@ void __declspec(dllexport) RegisterPlugin(struct aviutl2_host_app_table *host) {
 
 cleanup:
   if (!success) {
-    ptk_logf_error(&err, "%1$hs", "%1$hs", gettext("failed to register plugin."));
+    g_cache_index = -1;
+    wchar_t main_instruction[256];
+    ov_snprintf_wchar(main_instruction,
+                      sizeof(main_instruction) / sizeof(main_instruction[0]),
+                      L"%1$hs",
+                      L"%1$hs",
+                      gettext("failed to register plugin."));
+    ptk_error_dialog(
+        find_manager_window(), &err, L"PSDToolKit", main_instruction, NULL, TD_ERROR_ICON, TDCBF_OK_BUTTON);
     OV_ERROR_DESTROY(&err);
   }
 }

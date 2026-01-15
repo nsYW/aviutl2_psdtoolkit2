@@ -7,6 +7,37 @@ LayerSelector.__index = LayerSelector
 local debug = require("PSDToolKit.debug")
 local dbg = debug.dbg
 
+-- Wrapper for objects with getstate method in exclusive mode.
+-- Prepends hide prefix to the result of inner:getstate().
+local ExclusiveWrapper = {}
+ExclusiveWrapper.__index = ExclusiveWrapper
+
+function ExclusiveWrapper.new(hide_prefix, inner)
+	return setmetatable({
+		hide_prefix = hide_prefix,
+		inner = inner,
+	}, ExclusiveWrapper)
+end
+
+function ExclusiveWrapper:getstate(ctx)
+	local state = self.inner:getstate(ctx)
+	if type(state) == "string" and state ~= "" then
+		return self.hide_prefix .. " " .. state
+	elseif type(state) == "table" then
+		-- Array of strings - prepend to each string
+		local result = {}
+		for i, s in ipairs(state) do
+			if type(s) == "string" and s ~= "" then
+				result[i] = self.hide_prefix .. " " .. s
+			else
+				result[i] = s
+			end
+		end
+		return result
+	end
+	return state
+end
+
 --- Check if a layer path has an exclusive marker (*) in the final component.
 -- The marker must be at the start of the final path component after the last '/'.
 -- Examples:
@@ -56,13 +87,17 @@ function LayerSelector.build_exclusive_values(raw_values)
 
 	local hide_prefix = table.concat(hide_parts, " ")
 
-	-- Build result: for each value, prepend hide prefix if it's a string
+	-- Build result: for each value, prepend hide prefix if it's a string,
+	-- or wrap with ExclusiveWrapper if it's an object with getstate method
 	local result = {}
 	for i, value in ipairs(raw_values) do
 		if type(value) == "string" then
 			result[i] = hide_prefix .. " " .. value
+		elseif type(value) == "table" and type(value.getstate) == "function" then
+			-- Wrap object to prepend hide_prefix to its getstate result
+			result[i] = ExclusiveWrapper.new(hide_prefix, value)
 		else
-			-- Non-string values (objects) pass through unchanged
+			-- Other non-string values pass through unchanged
 			result[i] = value
 		end
 	end
