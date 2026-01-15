@@ -7,6 +7,30 @@
 
 #include "ovbase.h"
 
+/**
+ * @brief Custom error codes for IPC operations
+ *
+ * These codes are used with ov_error_type_generic to identify specific
+ * error conditions during IPC initialization and communication.
+ */
+enum ptk_ipc_error {
+  /**
+   * @brief IPC target executable not found
+   *
+   * PSDToolKit.exe was not found. This typically indicates that
+   * the installation files are corrupted or missing.
+   */
+  ptk_ipc_error_target_not_found = 4000,
+
+  /**
+   * @brief Access denied when launching IPC target
+   *
+   * Access to PSDToolKit.exe was denied. This is often caused by
+   * antivirus software blocking the execution.
+   */
+  ptk_ipc_error_target_access_denied = 4001,
+};
+
 struct ipc;
 
 struct ipc_update_editing_image_state_params {

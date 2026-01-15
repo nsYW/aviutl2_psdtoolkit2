@@ -38,6 +38,7 @@
 #include "cache.h"
 #include "error.h"
 #include "input.h"
+#include "ipc.h"
 #include "layer.h"
 #include "logf.h"
 #include "psdtoolkit.h"
@@ -238,6 +239,41 @@ BOOL __declspec(dllexport) InitializePlugin(DWORD version) {
 
 cleanup:
   if (!success) {
+    wchar_t main_instruction[256];
+    wchar_t content[1024];
+    wchar_t const *content_ptr = NULL;
+
+    // Check for specific IPC errors and provide user-friendly hints
+    if (ov_error_is(&err, ov_error_type_generic, ptk_ipc_error_target_not_found)) {
+      ov_snprintf_wchar(content,
+                        sizeof(content) / sizeof(content[0]),
+                        L"%1$hs",
+                        L"%1$hs",
+                        gettext("PSDToolKit.exe was not found.\n\n"
+                                "The installation files may be corrupted.\n"
+                                "Please try reinstalling PSDToolKit."));
+      content_ptr = content;
+    } else if (ov_error_is(&err, ov_error_type_generic, ptk_ipc_error_target_access_denied)) {
+      ov_snprintf_wchar(content,
+                        sizeof(content) / sizeof(content[0]),
+                        L"%1$hs",
+                        L"%1$hs",
+                        gettext("Access to PSDToolKit.exe was denied.\n\n"
+                                "This error may be caused by antivirus software\n"
+                                "blocking the execution of PSDToolKit.exe.\n\n"
+                                "Please check if your antivirus software is blocking the program."));
+      content_ptr = content;
+    }
+
+    ov_snprintf_wchar(main_instruction,
+                      sizeof(main_instruction) / sizeof(main_instruction[0]),
+                      L"%1$hs",
+                      L"%1$hs",
+                      gettext("failed to initialize plugin."));
+    ptk_error_dialog(
+        find_manager_window(), &err, L"PSDToolKit", main_instruction, content_ptr, TD_ERROR_ICON, TDCBF_OK_BUTTON);
+    OV_ERROR_DESTROY(&err);
+
     g_cache_index = -1;
     if (g_input) {
       ptk_input_destroy(&g_input);
@@ -252,15 +288,6 @@ cleanup:
       mo_set_default(NULL);
       mo_free(&g_mo);
     }
-    wchar_t main_instruction[256];
-    ov_snprintf_wchar(main_instruction,
-                      sizeof(main_instruction) / sizeof(main_instruction[0]),
-                      L"%1$hs",
-                      L"%1$hs",
-                      gettext("failed to initialize plugin."));
-    ptk_error_dialog(
-        find_manager_window(), &err, L"PSDToolKit", main_instruction, NULL, TD_ERROR_ICON, TDCBF_OK_BUTTON);
-    OV_ERROR_DESTROY(&err);
     return FALSE;
   }
   return TRUE;

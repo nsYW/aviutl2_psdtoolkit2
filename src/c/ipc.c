@@ -415,7 +415,16 @@ bool ipc_init(struct ipc **const ipc, struct ipc_options const *const opt, struc
     OV_ARRAY_SET_LENGTH(cmdline, exe_path_len + 3);
 
     if (!CreateProcessW(opt->exe_path, cmdline, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, opt->working_dir, &si, &pi)) {
-      OV_ERROR_SET_HRESULT(err, HRESULT_FROM_WIN32(GetLastError()));
+      HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+      if (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) || hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)) {
+        OV_ERROR_SET(err, ov_error_type_generic, ptk_ipc_error_target_not_found, NULL);
+        goto cleanup;
+      }
+      if (hr == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED)) {
+        OV_ERROR_SET(err, ov_error_type_generic, ptk_ipc_error_target_access_denied, NULL);
+        goto cleanup;
+      }
+      OV_ERROR_SET_HRESULT(err, hr);
       goto cleanup;
     }
     CloseHandle(pi.hThread);
