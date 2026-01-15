@@ -49,6 +49,9 @@ function M.new_frame()
 		error("PSDToolKit script module is not available")
 	end
 	local debug_mode, cache_index = ptk.get_debug_mode()
+	if cache_index < 0 then
+		error("PSDToolKit initialization failed")
+	end
 	debug.set_debug(debug_mode)
 
 	-- Clear ALL caches when cache_index changes (project load or cache clear)

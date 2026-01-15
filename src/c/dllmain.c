@@ -68,6 +68,9 @@ static int g_cache_index = 0;
  * to invalidate all cached data and notify Lua side.
  */
 static void update_cache_index(void) {
+  if (g_cache_index < 0) {
+    return;
+  }
   ++g_cache_index;
   if (g_cache) {
     ptk_cache_clear(g_cache);
@@ -185,6 +188,8 @@ BOOL __declspec(dllexport) InitializePlugin(DWORD version) {
   void *dll_hinst = NULL;
   bool success = false;
 
+  g_cache_index = 0;
+
   // Check minimum required AviUtl ExEdit2 version
   if (version < 2002800) {
     OV_ERROR_SETF(&err,
@@ -233,6 +238,7 @@ BOOL __declspec(dllexport) InitializePlugin(DWORD version) {
 
 cleanup:
   if (!success) {
+    g_cache_index = -1;
     if (g_input) {
       ptk_input_destroy(&g_input);
     }
@@ -262,6 +268,7 @@ cleanup:
 
 void __declspec(dllexport) UninitializePlugin(void);
 void __declspec(dllexport) UninitializePlugin(void) {
+  g_cache_index = -1;
   if (g_msg_hook) {
     UnhookWindowsHookEx(g_msg_hook);
     g_msg_hook = NULL;
@@ -310,6 +317,11 @@ static void config_menu_handler(HWND const hwnd, HINSTANCE const dll_hinst) {
 }
 
 static void script_module_get_debug_mode(struct aviutl2_script_module_param *param) {
+  if (!g_script_module) {
+    param->push_result_boolean(false);
+    param->push_result_int(g_cache_index);
+    return;
+  }
   ptk_script_module_get_debug_mode(g_script_module, param, g_cache_index);
 }
 static void script_module_generate_tag(struct aviutl2_script_module_param *param) {
@@ -542,6 +554,7 @@ void __declspec(dllexport) RegisterPlugin(struct aviutl2_host_app_table *host) {
 
 cleanup:
   if (!success) {
+    g_cache_index = -1;
     wchar_t main_instruction[256];
     ov_snprintf_wchar(main_instruction,
                       sizeof(main_instruction) / sizeof(main_instruction[0]),
