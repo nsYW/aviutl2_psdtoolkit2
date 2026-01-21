@@ -16,10 +16,6 @@ static char const json_suffix[] = "]==]";
 
 static size_t const json_prefix_len = sizeof(json_prefix) - 1;
 
-// ============================================================================
-// Internal data structures
-// ============================================================================
-
 struct param {
   uint32_t id;
   uintptr_t userdata;
@@ -39,21 +35,19 @@ struct item {
 struct selector {
   uint32_t id;
   uintptr_t userdata;
-  char *group;
+  char *name;
   struct item *items; // ovarray
 };
 
 // enum ptk_anm2_op_type is now defined in anm2.h
 
 struct ptk_anm2_op {
-  size_t sel_idx;
-  size_t item_idx;
-  size_t param_idx;
-  size_t move_to_sel_idx;
-  size_t move_to_idx;
+  uint32_t id;        // ID of affected element
+  uint32_t parent_id; // Parent ID (selector for item, item for param)
+  uint32_t before_id; // For insert/move: ID of element before which to insert (0=end)
   enum ptk_anm2_op_type type;
-  char *str_data;     // Previous string value
-  void *removed_data; // Removed struct (selector/item/param)
+  char *str_data;
+  void *removed_data;
 };
 
 struct ptk_anm2 {
@@ -71,11 +65,10 @@ struct ptk_anm2 {
   uint64_t calculated_checksum; // checksum calculated from script body (set by load)
   ptk_anm2_change_callback change_callback;
   void *change_callback_userdata;
+  ptk_anm2_state_callback state_callback;
+  void *state_callback_userdata;
+  bool modified; // true if document has unsaved changes
 };
-
-// ============================================================================
-// Internal helper implementations
-// ============================================================================
 
 static uint32_t generate_id(struct ptk_anm2 *const doc) { return doc->next_id++; }
 
@@ -117,8 +110,8 @@ static void selector_free(struct selector *sel) {
   if (!sel) {
     return;
   }
-  if (sel->group) {
-    OV_ARRAY_DESTROY(&sel->group);
+  if (sel->name) {
+    OV_ARRAY_DESTROY(&sel->name);
   }
   if (sel->items) {
     size_t const n = OV_ARRAY_LENGTH(sel->items);
@@ -166,13 +159,13 @@ static void op_free(struct ptk_anm2_op *op) {
       OV_FREE(&op->removed_data);
       break;
     case ptk_anm2_op_reset:
-    case ptk_anm2_op_group_begin:
-    case ptk_anm2_op_group_end:
+    case ptk_anm2_op_transaction_begin:
+    case ptk_anm2_op_transaction_end:
     case ptk_anm2_op_set_label:
     case ptk_anm2_op_set_psd_path:
     case ptk_anm2_op_set_exclusive_support_default:
     case ptk_anm2_op_set_information:
-    case ptk_anm2_op_selector_set_group:
+    case ptk_anm2_op_selector_set_name:
     case ptk_anm2_op_selector_move:
     case ptk_anm2_op_item_set_name:
     case ptk_anm2_op_item_set_value:
@@ -220,15 +213,43 @@ static bool strdup_to_array(char **dest, char const *src, struct ov_error *const
   return true;
 }
 
-static void notify_change(struct ptk_anm2 const *doc,
-                          enum ptk_anm2_op_type op_type,
-                          size_t sel_idx,
-                          size_t item_idx,
-                          size_t param_idx,
-                          size_t to_sel_idx,
-                          size_t to_idx) {
-  if (doc && doc->change_callback) {
-    doc->change_callback(doc->change_callback_userdata, op_type, sel_idx, item_idx, param_idx, to_sel_idx, to_idx);
+// Get before_id for selector at position idx (0 if at end)
+static uint32_t get_selector_before_id(struct ptk_anm2 *doc, size_t idx) {
+  size_t const n = OV_ARRAY_LENGTH(doc->selectors);
+  if (idx + 1 >= n) {
+    return 0;
+  }
+  return doc->selectors[idx + 1].id;
+}
+
+// Get before_id for item at position idx within selector (0 if at end)
+static uint32_t get_item_before_id(struct selector *sel, size_t idx) {
+  size_t const n = OV_ARRAY_LENGTH(sel->items);
+  if (idx + 1 >= n) {
+    return 0;
+  }
+  return sel->items[idx + 1].id;
+}
+
+// Get before_id for param at position idx within item (0 if at end)
+static uint32_t get_param_before_id(struct item *it, size_t idx) {
+  size_t const n = OV_ARRAY_LENGTH(it->params);
+  if (idx + 1 >= n) {
+    return 0;
+  }
+  return it->params[idx + 1].id;
+}
+
+static void notify_change(
+    struct ptk_anm2 *doc, enum ptk_anm2_op_type op_type, uint32_t id, uint32_t parent_id, uint32_t before_id) {
+  if (!doc) {
+    return;
+  }
+  if (op_type != ptk_anm2_op_reset) {
+    doc->modified = true;
+  }
+  if (doc->change_callback) {
+    doc->change_callback(doc->change_callback_userdata, op_type, id, parent_id, before_id);
   }
 }
 
@@ -240,9 +261,19 @@ void ptk_anm2_set_change_callback(struct ptk_anm2 *doc, ptk_anm2_change_callback
   doc->change_callback_userdata = userdata;
 }
 
-// ============================================================================
-// Save helpers (code generation)
-// ============================================================================
+void ptk_anm2_set_state_callback(struct ptk_anm2 *doc, ptk_anm2_state_callback callback, void *userdata) {
+  if (!doc) {
+    return;
+  }
+  doc->state_callback = callback;
+  doc->state_callback_userdata = userdata;
+}
+
+static void notify_state(struct ptk_anm2 const *doc) {
+  if (doc && doc->state_callback) {
+    doc->state_callback(doc->state_callback_userdata);
+  }
+}
 
 static uint64_t calculate_checksum(char const *const script_body, size_t const body_len) {
   struct ov_cyrb64 ctx;
@@ -440,7 +471,7 @@ static bool generate_json_line(char **const content,
     for (size_t i = 0; i < selectors_len; i++) {
       struct selector const *const sel = &doc->selectors[i];
       yyjson_mut_val *sel_obj = yyjson_mut_obj(jdoc);
-      yyjson_mut_obj_add_strcpy(jdoc, sel_obj, "group", sel->group);
+      yyjson_mut_obj_add_strcpy(jdoc, sel_obj, "group", sel->name);
 
       yyjson_mut_val *items = yyjson_mut_arr(jdoc);
       size_t const items_len = OV_ARRAY_LENGTH(sel->items);
@@ -608,7 +639,7 @@ generate_script_content(struct ptk_anm2 const *const doc, char **const content, 
       // Variable name is auto-generated as sel1, sel2, etc.
       // Use fallback name if group is NULL (should not happen, but safety measure)
       char const *const group_name =
-          sel->group ? sel->group : pgettext(".ptk.anm2 default name for unnamed selector", "Selector");
+          sel->name ? sel->name : pgettext(".ptk.anm2 default name for unnamed selector", "Selector");
       if (!ov_sprintf_append_char(&body, err, "%1$zu%2$hs", "--select@sel%1$zu:%2$hs", i + 1, group_name)) {
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
@@ -766,24 +797,7 @@ cleanup:
   return success;
 }
 
-// ============================================================================
-// Document lifecycle
-// ============================================================================
-
 // Initialize document structure (does not allocate the struct itself)
-static bool doc_init(struct ptk_anm2 *doc, struct ov_error *const err) {
-  *doc = (struct ptk_anm2){
-      .version = 1,
-      .next_id = 1,
-      .exclusive_support_default = true,
-  };
-  if (!strdup_to_array(&doc->label, pgettext(".ptk.anm2 label", "PSD"), err)) {
-    OV_ERROR_ADD_TRACE(err);
-    return false;
-  }
-  return true;
-}
-
 // Cleanup document contents (does not free the struct itself)
 static void doc_cleanup(struct ptk_anm2 *doc) {
   if (!doc) {
@@ -809,6 +823,43 @@ static void doc_cleanup(struct ptk_anm2 *doc) {
   op_stack_clear(&doc->redo_stack);
 }
 
+bool ptk_anm2_reset(struct ptk_anm2 *doc, struct ov_error *const err) {
+  if (!doc) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    return false;
+  }
+
+  // Save callbacks before cleanup
+  ptk_anm2_change_callback const cb = doc->change_callback;
+  void *const cb_userdata = doc->change_callback_userdata;
+  ptk_anm2_state_callback const state_cb = doc->state_callback;
+  void *const state_cb_userdata = doc->state_callback_userdata;
+
+  // Clean up document contents
+  doc_cleanup(doc);
+
+  // Initialize as empty document
+  *doc = (struct ptk_anm2){
+      .version = 1,
+      .next_id = 1,
+      .exclusive_support_default = true,
+      .change_callback = cb,
+      .change_callback_userdata = cb_userdata,
+      .state_callback = state_cb,
+      .state_callback_userdata = state_cb_userdata,
+  };
+  if (!strdup_to_array(&doc->label, pgettext(".ptk.anm2 label", "PSD"), err)) {
+    OV_ERROR_ADD_TRACE(err);
+    return false;
+  }
+
+  // Notify change
+  notify_change(doc, ptk_anm2_op_reset, 0, 0, 0);
+  notify_state(doc);
+
+  return true;
+}
+
 struct ptk_anm2 *ptk_anm2_new(struct ov_error *const err) {
   struct ptk_anm2 *doc = NULL;
   bool success = false;
@@ -817,8 +868,9 @@ struct ptk_anm2 *ptk_anm2_new(struct ov_error *const err) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
     goto cleanup;
   }
+  *doc = (struct ptk_anm2){0};
 
-  if (!doc_init(doc, err)) {
+  if (!ptk_anm2_reset(doc, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
@@ -843,10 +895,6 @@ void ptk_anm2_destroy(struct ptk_anm2 **doc) {
   OV_FREE(doc);
 }
 
-// ============================================================================
-// Metadata operations (stub implementations)
-// ============================================================================
-
 char const *ptk_anm2_get_label(struct ptk_anm2 const *doc) {
   if (!doc) {
     return NULL;
@@ -866,17 +914,6 @@ static bool push_undo_op(struct ptk_anm2 *doc, struct ptk_anm2_op const *op, str
 }
 
 static void clear_redo_stack(struct ptk_anm2 *doc) { op_stack_clear(&doc->redo_stack); }
-
-static bool push_redo_op(struct ptk_anm2 *doc, struct ptk_anm2_op const *op, struct ov_error *const err) {
-  size_t const len = OV_ARRAY_LENGTH(doc->redo_stack);
-  if (!OV_ARRAY_GROW(&doc->redo_stack, len + 1)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
-    return false;
-  }
-  doc->redo_stack[len] = *op;
-  OV_ARRAY_SET_LENGTH(doc->redo_stack, len + 1);
-  return true;
-}
 
 // Apply a single operation (used for redo)
 // Returns the reverse operation via reverse_op (caller takes ownership of allocated fields)
@@ -948,21 +985,21 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
     }
     break;
 
-  case ptk_anm2_op_group_begin:
-    // GROUP_BEGIN's reverse is GROUP_END
-    reverse_op->type = ptk_anm2_op_group_end;
+  case ptk_anm2_op_transaction_begin:
+    // TRANSACTION_BEGIN's reverse is TRANSACTION_END
+    reverse_op->type = ptk_anm2_op_transaction_end;
     break;
 
-  case ptk_anm2_op_group_end:
-    // GROUP_END's reverse is GROUP_BEGIN
-    reverse_op->type = ptk_anm2_op_group_begin;
+  case ptk_anm2_op_transaction_end:
+    // TRANSACTION_END's reverse is TRANSACTION_BEGIN
+    reverse_op->type = ptk_anm2_op_transaction_begin;
     break;
 
   case ptk_anm2_op_selector_insert:
-    // INSERT: insert selector at op->sel_idx using op->removed_data
+    // INSERT: insert selector using op->before_id for position
     // op->removed_data contains the selector to insert
+    // before_id = 0 means insert at end, otherwise insert before the element with that ID
     {
-      size_t const idx = op->sel_idx;
       struct selector *sel = (struct selector *)op->removed_data;
       if (!sel) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
@@ -970,6 +1007,16 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
       }
 
       size_t const len = OV_ARRAY_LENGTH(doc->selectors);
+
+      // Calculate insertion index from before_id
+      size_t idx = len; // Default: insert at end
+      if (op->before_id != 0) {
+        size_t before_idx = 0;
+        if (ptk_anm2_find_selector(doc, op->before_id, &before_idx)) {
+          idx = before_idx;
+        }
+        // If before_id not found, insert at end
+      }
 
       // Grow array
       if (!OV_ARRAY_GROW(&doc->selectors, len + 1)) {
@@ -990,23 +1037,27 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
       OV_FREE(&sel);
       op->removed_data = NULL; // Mark as consumed
 
-      // Reverse operation: REMOVE at that index
+      // Reverse operation: REMOVE
       reverse_op->type = ptk_anm2_op_selector_remove;
-      reverse_op->sel_idx = idx;
+      reverse_op->id = op->id;
+      // before_id for reverse: element after the inserted one (for re-insertion position)
+      reverse_op->before_id = get_selector_before_id(doc, idx);
       reverse_op->removed_data = NULL;
     }
     break;
 
   case ptk_anm2_op_selector_remove:
-    // REMOVE: remove selector at op->sel_idx
+    // REMOVE: remove selector by op->id
     // Save the removed selector to reverse_op->removed_data
     {
-      size_t const idx = op->sel_idx;
-      size_t const len = OV_ARRAY_LENGTH(doc->selectors);
-      if (idx >= len) {
+      // Find selector by ID
+      size_t idx = 0;
+      if (!ptk_anm2_find_selector(doc, op->id, &idx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
+
+      size_t const len = OV_ARRAY_LENGTH(doc->selectors);
 
       // Allocate storage for the removed selector
       struct selector *removed_sel = NULL;
@@ -1016,6 +1067,9 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
       }
       *removed_sel = doc->selectors[idx];
 
+      // Calculate before_id for reverse operation (element that will be after the removed one)
+      uint32_t next_id = (idx + 1 < len) ? doc->selectors[idx + 1].id : 0;
+
       // Shift remaining selectors
       for (size_t i = idx; i < len - 1; i++) {
         doc->selectors[i] = doc->selectors[i + 1];
@@ -1024,23 +1078,23 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
 
       // Reverse operation: INSERT with the saved selector
       reverse_op->type = ptk_anm2_op_selector_insert;
-      reverse_op->sel_idx = idx;
+      reverse_op->before_id = next_id;
       reverse_op->removed_data = removed_sel;
+      reverse_op->id = removed_sel->id;
     }
     break;
 
   case ptk_anm2_op_item_insert:
-    // INSERT: insert item at (op->sel_idx, op->item_idx) using op->removed_data
-    // op->removed_data contains the item to insert
+    // INSERT: insert item using op->parent_id (selector) and op->before_id for position
     {
-      size_t const sidx = op->sel_idx;
-      size_t const iidx = op->item_idx;
       struct item *it = (struct item *)op->removed_data;
       if (!it) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
-      if (!doc->selectors || sidx >= OV_ARRAY_LENGTH(doc->selectors)) {
+
+      size_t sidx = 0;
+      if (!ptk_anm2_find_selector(doc, op->parent_id, &sidx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
@@ -1048,51 +1102,51 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
       struct selector *sel = &doc->selectors[sidx];
       size_t const len = OV_ARRAY_LENGTH(sel->items);
 
-      // Grow array
+      size_t iidx = len;
+      if (op->before_id != 0) {
+        for (size_t i = 0; i < len; i++) {
+          if (sel->items[i].id == op->before_id) {
+            iidx = i;
+            break;
+          }
+        }
+      }
+
       if (!OV_ARRAY_GROW(&sel->items, len + 1)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
         goto cleanup;
       }
 
-      // Shift elements to make room
       for (size_t i = len; i > iidx; i--) {
         sel->items[i] = sel->items[i - 1];
       }
 
-      // Insert the item
       sel->items[iidx] = *it;
       OV_ARRAY_SET_LENGTH(sel->items, len + 1);
 
-      // Free the container (content is now owned by doc)
       OV_FREE(&it);
-      op->removed_data = NULL; // Mark as consumed
+      op->removed_data = NULL;
 
-      // Reverse operation: REMOVE at that index
       reverse_op->type = ptk_anm2_op_item_remove;
-      reverse_op->sel_idx = sidx;
-      reverse_op->item_idx = iidx;
+      reverse_op->id = op->id;
+      reverse_op->parent_id = op->parent_id;
+      reverse_op->before_id = get_item_before_id(sel, iidx);
       reverse_op->removed_data = NULL;
     }
     break;
 
   case ptk_anm2_op_item_remove:
-    // REMOVE: remove item at (op->sel_idx, op->item_idx)
-    // Save the removed item to reverse_op->removed_data
+    // REMOVE: remove item by op->id
     {
-      size_t const sidx = op->sel_idx;
-      size_t const iidx = op->item_idx;
-      if (!doc->selectors || sidx >= OV_ARRAY_LENGTH(doc->selectors)) {
-        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-        goto cleanup;
-      }
-      struct selector *sel = &doc->selectors[sidx];
-      size_t const len = OV_ARRAY_LENGTH(sel->items);
-      if (iidx >= len) {
+      size_t sidx = 0, iidx = 0;
+      if (!ptk_anm2_find_item(doc, op->id, &sidx, &iidx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
 
-      // Allocate storage for the removed item
+      struct selector *sel = &doc->selectors[sidx];
+      size_t const len = OV_ARRAY_LENGTH(sel->items);
+
       struct item *removed_item = NULL;
       if (!OV_REALLOC(&removed_item, 1, sizeof(struct item))) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
@@ -1100,97 +1154,102 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
       }
       *removed_item = sel->items[iidx];
 
-      // Shift remaining items
+      uint32_t next_id = (iidx + 1 < len) ? sel->items[iidx + 1].id : 0;
+
       for (size_t i = iidx; i < len - 1; i++) {
         sel->items[i] = sel->items[i + 1];
       }
       OV_ARRAY_SET_LENGTH(sel->items, len - 1);
 
-      // Reverse operation: INSERT with the saved item
       reverse_op->type = ptk_anm2_op_item_insert;
-      reverse_op->sel_idx = sidx;
-      reverse_op->item_idx = iidx;
+      reverse_op->before_id = next_id;
       reverse_op->removed_data = removed_item;
+      reverse_op->id = removed_item->id;
+      reverse_op->parent_id = sel->id;
     }
     break;
 
   case ptk_anm2_op_param_insert:
-    // INSERT: insert param at (op->sel_idx, op->item_idx, op->param_idx) using op->removed_data
-    // op->removed_data contains the param to insert
+    // INSERT: insert param before element with op->before_id (0=end)
+    // op->parent_id contains the item ID, op->removed_data contains the param to insert
     {
-      size_t const sidx = op->sel_idx;
-      size_t const iidx = op->item_idx;
-      size_t const pidx = op->param_idx;
       struct param *p = (struct param *)op->removed_data;
       if (!p) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
-      if (!doc->selectors || sidx >= OV_ARRAY_LENGTH(doc->selectors)) {
-        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-        goto cleanup;
-      }
-      struct selector *sel = &doc->selectors[sidx];
-      if (!sel->items || iidx >= OV_ARRAY_LENGTH(sel->items)) {
+
+      size_t sidx = 0;
+      size_t iidx = 0;
+      if (!ptk_anm2_find_item(doc, op->parent_id, &sidx, &iidx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
 
-      struct item *it = &sel->items[iidx];
+      struct item *it = &doc->selectors[sidx].items[iidx];
       size_t const len = OV_ARRAY_LENGTH(it->params);
 
-      // Grow array
+      size_t pidx = len;
+      if (op->before_id != 0) {
+        for (size_t i = 0; i < len; i++) {
+          if (it->params[i].id == op->before_id) {
+            pidx = i;
+            break;
+          }
+        }
+      }
+
       if (!OV_ARRAY_GROW(&it->params, len + 1)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
         goto cleanup;
       }
 
-      // Shift elements to make room
       for (size_t i = len; i > pidx; i--) {
         it->params[i] = it->params[i - 1];
       }
 
-      // Insert the param
       it->params[pidx] = *p;
       OV_ARRAY_SET_LENGTH(it->params, len + 1);
 
-      // Free the container (content is now owned by doc)
-      OV_FREE(&p);
-      op->removed_data = NULL; // Mark as consumed
+      uint32_t next_id = (pidx + 1 < len + 1) ? it->params[pidx + 1].id : 0;
 
-      // Reverse operation: REMOVE at that index
       reverse_op->type = ptk_anm2_op_param_remove;
-      reverse_op->sel_idx = sidx;
-      reverse_op->item_idx = iidx;
-      reverse_op->param_idx = pidx;
       reverse_op->removed_data = NULL;
+      reverse_op->id = op->id;
+      reverse_op->parent_id = op->parent_id;
+      reverse_op->before_id = next_id;
+
+      OV_FREE(&p);
+      op->removed_data = NULL;
     }
     break;
 
   case ptk_anm2_op_param_remove:
-    // REMOVE: remove param at (op->sel_idx, op->item_idx, op->param_idx)
-    // Save the removed param to reverse_op->removed_data
+    // REMOVE: remove param with op->id from item op->parent_id
     {
-      size_t const sidx = op->sel_idx;
-      size_t const iidx = op->item_idx;
-      size_t const pidx = op->param_idx;
-      if (!doc->selectors || sidx >= OV_ARRAY_LENGTH(doc->selectors)) {
+      size_t sidx = 0;
+      size_t iidx = 0;
+      if (!ptk_anm2_find_item(doc, op->parent_id, &sidx, &iidx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
-      struct selector *sel = &doc->selectors[sidx];
-      if (!sel->items || iidx >= OV_ARRAY_LENGTH(sel->items)) {
-        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-        goto cleanup;
-      }
-      struct item *it = &sel->items[iidx];
+
+      struct item *it = &doc->selectors[sidx].items[iidx];
       size_t const len = OV_ARRAY_LENGTH(it->params);
+      size_t pidx = len;
+      for (size_t i = 0; i < len; i++) {
+        if (it->params[i].id == op->id) {
+          pidx = i;
+          break;
+        }
+      }
       if (pidx >= len) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
 
-      // Allocate storage for the removed param
+      uint32_t next_id = (pidx + 1 < len) ? it->params[pidx + 1].id : 0;
+
       struct param *removed_param = NULL;
       if (!OV_REALLOC(&removed_param, 1, sizeof(struct param))) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
@@ -1198,53 +1257,70 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
       }
       *removed_param = it->params[pidx];
 
-      // Shift remaining params
       for (size_t i = pidx; i < len - 1; i++) {
         it->params[i] = it->params[i + 1];
       }
       OV_ARRAY_SET_LENGTH(it->params, len - 1);
 
-      // Reverse operation: INSERT with the saved param
       reverse_op->type = ptk_anm2_op_param_insert;
-      reverse_op->sel_idx = sidx;
-      reverse_op->item_idx = iidx;
-      reverse_op->param_idx = pidx;
       reverse_op->removed_data = removed_param;
+      reverse_op->id = removed_param->id;
+      reverse_op->parent_id = it->id;
+      reverse_op->before_id = next_id;
     }
     break;
 
-  case ptk_anm2_op_selector_set_group:
+  case ptk_anm2_op_selector_set_name:
     // Save current value as reverse, apply op->str_data
     {
-      size_t const sidx = op->sel_idx;
-      if (!doc->selectors || sidx >= OV_ARRAY_LENGTH(doc->selectors)) {
+      size_t sidx = 0;
+      if (!ptk_anm2_find_selector(doc, op->id, &sidx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
       struct selector *sel = &doc->selectors[sidx];
-      if (!strdup_to_array(&reverse_op->str_data, sel->group, err)) {
+      if (!strdup_to_array(&reverse_op->str_data, sel->name, err)) {
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
       }
-      if (!strdup_to_array(&sel->group, op->str_data, err)) {
+      if (!strdup_to_array(&sel->name, op->str_data, err)) {
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
       }
-      reverse_op->sel_idx = sidx;
+      reverse_op->id = sel->id;
     }
     break;
 
   case ptk_anm2_op_selector_move:
-    // MOVE: move selector from op->sel_idx to op->move_to_idx
+    // MOVE: move selector (op->id) to position before op->before_id (0=end)
     {
-      size_t const from = op->sel_idx;
-      size_t const to = op->move_to_idx;
-      size_t const len = OV_ARRAY_LENGTH(doc->selectors);
-      if (from >= len || to >= len) {
+      // Find current position of the selector to move
+      size_t from = 0;
+      if (!ptk_anm2_find_selector(doc, op->id, &from)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
-      if (from != to) {
+
+      size_t const len = OV_ARRAY_LENGTH(doc->selectors);
+
+      // Calculate target position from before_id
+      size_t to = len; // Default: move to end
+      if (op->before_id != 0) {
+        size_t before_idx = 0;
+        if (ptk_anm2_find_selector(doc, op->before_id, &before_idx)) {
+          to = before_idx;
+        }
+      }
+
+      // Adjust: if moving forward and to > from, we need to account for removal
+      if (from < to && to > 0) {
+        to--;
+      }
+
+      // Save before_id for reverse operation (element after current position)
+      uint32_t reverse_before_id = get_selector_before_id(doc, from);
+
+      if (from != to && to < len) {
         struct selector tmp = doc->selectors[from];
         if (from < to) {
           for (size_t i = from; i < to; i++) {
@@ -1257,27 +1333,23 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
         }
         doc->selectors[to] = tmp;
       }
-      // Reverse operation: move from 'to' back to 'from'
-      reverse_op->sel_idx = to;
-      reverse_op->move_to_idx = from;
+
+      // Reverse operation: move back to original position
+      reverse_op->id = op->id;
+      reverse_op->before_id = reverse_before_id;
     }
     break;
 
   case ptk_anm2_op_item_set_name:
     // Save current value as reverse, apply op->str_data
     {
-      size_t const sidx = op->sel_idx;
-      size_t const iidx = op->item_idx;
-      if (!doc->selectors || sidx >= OV_ARRAY_LENGTH(doc->selectors)) {
+      size_t sidx = 0;
+      size_t iidx = 0;
+      if (!ptk_anm2_find_item(doc, op->id, &sidx, &iidx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
-      struct selector *sel = &doc->selectors[sidx];
-      if (!sel->items || iidx >= OV_ARRAY_LENGTH(sel->items)) {
-        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-        goto cleanup;
-      }
-      struct item *it = &sel->items[iidx];
+      struct item *it = &doc->selectors[sidx].items[iidx];
       if (!strdup_to_array(&reverse_op->str_data, it->name, err)) {
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
@@ -1286,26 +1358,20 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
       }
-      reverse_op->sel_idx = sidx;
-      reverse_op->item_idx = iidx;
+      reverse_op->id = it->id;
     }
     break;
 
   case ptk_anm2_op_item_set_value:
     // Save current value as reverse, apply op->str_data
     {
-      size_t const sidx = op->sel_idx;
-      size_t const iidx = op->item_idx;
-      if (!doc->selectors || sidx >= OV_ARRAY_LENGTH(doc->selectors)) {
+      size_t sidx = 0;
+      size_t iidx = 0;
+      if (!ptk_anm2_find_item(doc, op->id, &sidx, &iidx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
-      struct selector *sel = &doc->selectors[sidx];
-      if (!sel->items || iidx >= OV_ARRAY_LENGTH(sel->items)) {
-        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-        goto cleanup;
-      }
-      struct item *it = &sel->items[iidx];
+      struct item *it = &doc->selectors[sidx].items[iidx];
       if (!strdup_to_array(&reverse_op->str_data, it->value, err)) {
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
@@ -1314,26 +1380,20 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
       }
-      reverse_op->sel_idx = sidx;
-      reverse_op->item_idx = iidx;
+      reverse_op->id = it->id;
     }
     break;
 
   case ptk_anm2_op_item_set_script_name:
     // Save current value as reverse, apply op->str_data
     {
-      size_t const sidx = op->sel_idx;
-      size_t const iidx = op->item_idx;
-      if (!doc->selectors || sidx >= OV_ARRAY_LENGTH(doc->selectors)) {
+      size_t sidx = 0;
+      size_t iidx = 0;
+      if (!ptk_anm2_find_item(doc, op->id, &sidx, &iidx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
-      struct selector *sel = &doc->selectors[sidx];
-      if (!sel->items || iidx >= OV_ARRAY_LENGTH(sel->items)) {
-        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-        goto cleanup;
-      }
-      struct item *it = &sel->items[iidx];
+      struct item *it = &doc->selectors[sidx].items[iidx];
       if (!strdup_to_array(&reverse_op->str_data, it->script_name, err)) {
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
@@ -1342,21 +1402,21 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
       }
-      reverse_op->sel_idx = sidx;
-      reverse_op->item_idx = iidx;
+      reverse_op->id = it->id;
     }
     break;
 
   case ptk_anm2_op_item_move:
-    // MOVE: move item from (op->sel_idx, op->item_idx) to (op->move_to_sel_idx, op->move_to_idx)
+    // MOVE: move item (op->id) to selector (op->parent_id), before (op->before_id)
     {
-      size_t const from_sidx = op->sel_idx;
-      size_t const from_iidx = op->item_idx;
-      size_t const to_sidx = op->move_to_sel_idx;
-      size_t const to_iidx = op->move_to_idx;
+      size_t from_sidx = 0, from_iidx = 0;
+      if (!ptk_anm2_find_item(doc, op->id, &from_sidx, &from_iidx)) {
+        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+        goto cleanup;
+      }
 
-      if (!doc->selectors || from_sidx >= OV_ARRAY_LENGTH(doc->selectors) ||
-          to_sidx >= OV_ARRAY_LENGTH(doc->selectors)) {
+      size_t to_sidx = 0;
+      if (!ptk_anm2_find_selector(doc, op->parent_id, &to_sidx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
@@ -1365,17 +1425,24 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
       struct selector *to_sel = &doc->selectors[to_sidx];
 
       size_t const from_len = OV_ARRAY_LENGTH(from_sel->items);
-      if (from_iidx >= from_len) {
-        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-        goto cleanup;
+      size_t const to_len = OV_ARRAY_LENGTH(to_sel->items);
+
+      size_t to_iidx = to_len;
+      if (op->before_id != 0) {
+        for (size_t i = 0; i < to_len; i++) {
+          if (to_sel->items[i].id == op->before_id) {
+            to_iidx = i;
+            break;
+          }
+        }
       }
 
+      uint32_t reverse_before_id = get_item_before_id(from_sel, from_iidx);
+      uint32_t reverse_parent_id = from_sel->id;
+
       if (from_sidx == to_sidx) {
-        // Same selector move
-        size_t const len = from_len;
-        if (to_iidx >= len) {
-          OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-          goto cleanup;
+        if (from_iidx < to_iidx && to_iidx > 0) {
+          to_iidx--;
         }
         if (from_iidx != to_iidx) {
           struct item tmp = from_sel->items[from_iidx];
@@ -1391,24 +1458,14 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
           from_sel->items[to_iidx] = tmp;
         }
       } else {
-        // Cross-selector move
-        size_t const to_len = OV_ARRAY_LENGTH(to_sel->items);
-        if (to_iidx > to_len) {
-          OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-          goto cleanup;
-        }
-
         struct item tmp = from_sel->items[from_iidx];
 
-        // Remove from source
         for (size_t i = from_iidx; i < from_len - 1; i++) {
           from_sel->items[i] = from_sel->items[i + 1];
         }
         OV_ARRAY_SET_LENGTH(from_sel->items, from_len - 1);
 
-        // Insert into destination
         if (!OV_ARRAY_GROW(&to_sel->items, to_len + 1)) {
-          // Rollback
           OV_ARRAY_SET_LENGTH(from_sel->items, from_len);
           for (size_t i = from_len - 1; i > from_iidx; i--) {
             from_sel->items[i] = from_sel->items[i - 1];
@@ -1425,35 +1482,23 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
         to_sel->items[to_iidx] = tmp;
       }
 
-      // Reverse operation: move from (to_sidx, to_iidx) back to (from_sidx, from_iidx)
-      reverse_op->sel_idx = to_sidx;
-      reverse_op->item_idx = to_iidx;
-      reverse_op->move_to_sel_idx = from_sidx;
-      reverse_op->move_to_idx = from_iidx;
+      reverse_op->id = op->id;
+      reverse_op->parent_id = reverse_parent_id;
+      reverse_op->before_id = reverse_before_id;
     }
     break;
 
   case ptk_anm2_op_param_set_key:
     // Save current value as reverse, apply op->str_data
     {
-      size_t const sidx = op->sel_idx;
-      size_t const iidx = op->item_idx;
-      size_t const pidx = op->param_idx;
-      if (!doc->selectors || sidx >= OV_ARRAY_LENGTH(doc->selectors)) {
+      size_t sidx = 0;
+      size_t iidx = 0;
+      size_t pidx = 0;
+      if (!ptk_anm2_find_param(doc, op->id, &sidx, &iidx, &pidx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
-      struct selector *sel = &doc->selectors[sidx];
-      if (!sel->items || iidx >= OV_ARRAY_LENGTH(sel->items)) {
-        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-        goto cleanup;
-      }
-      struct item *it = &sel->items[iidx];
-      if (!it->params || pidx >= OV_ARRAY_LENGTH(it->params)) {
-        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-        goto cleanup;
-      }
-      struct param *p = &it->params[pidx];
+      struct param *p = &doc->selectors[sidx].items[iidx].params[pidx];
       if (!strdup_to_array(&reverse_op->str_data, p->key, err)) {
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
@@ -1462,33 +1507,21 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
       }
-      reverse_op->sel_idx = sidx;
-      reverse_op->item_idx = iidx;
-      reverse_op->param_idx = pidx;
+      reverse_op->id = p->id;
     }
     break;
 
   case ptk_anm2_op_param_set_value:
     // Save current value as reverse, apply op->str_data
     {
-      size_t const sidx = op->sel_idx;
-      size_t const iidx = op->item_idx;
-      size_t const pidx = op->param_idx;
-      if (!doc->selectors || sidx >= OV_ARRAY_LENGTH(doc->selectors)) {
+      size_t sidx = 0;
+      size_t iidx = 0;
+      size_t pidx = 0;
+      if (!ptk_anm2_find_param(doc, op->id, &sidx, &iidx, &pidx)) {
         OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
         goto cleanup;
       }
-      struct selector *sel = &doc->selectors[sidx];
-      if (!sel->items || iidx >= OV_ARRAY_LENGTH(sel->items)) {
-        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-        goto cleanup;
-      }
-      struct item *it = &sel->items[iidx];
-      if (!it->params || pidx >= OV_ARRAY_LENGTH(it->params)) {
-        OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-        goto cleanup;
-      }
-      struct param *p = &it->params[pidx];
+      struct param *p = &doc->selectors[sidx].items[iidx].params[pidx];
       if (!strdup_to_array(&reverse_op->str_data, p->value, err)) {
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
@@ -1497,9 +1530,7 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
         OV_ERROR_ADD_TRACE(err);
         goto cleanup;
       }
-      reverse_op->sel_idx = sidx;
-      reverse_op->item_idx = iidx;
-      reverse_op->param_idx = pidx;
+      reverse_op->id = p->id;
     }
     break;
 
@@ -1510,52 +1541,79 @@ apply_op(struct ptk_anm2 *doc, struct ptk_anm2_op *op, struct ptk_anm2_op *rever
   }
 
   // Notify change callback
-  // Now that apply_op executes the operation as named, notify with the operation type directly.
   switch (op->type) {
   case ptk_anm2_op_set_label:
   case ptk_anm2_op_set_psd_path:
   case ptk_anm2_op_set_exclusive_support_default:
   case ptk_anm2_op_set_information:
-    notify_change(doc, op->type, 0, 0, 0, 0, 0);
+    notify_change(doc, op->type, 0, 0, 0);
     break;
-  case ptk_anm2_op_selector_insert:
+  case ptk_anm2_op_selector_insert: {
+    size_t idx = 0;
+    uint32_t before_id = 0;
+    if (ptk_anm2_find_selector(doc, op->id, &idx)) {
+      before_id = get_selector_before_id(doc, idx);
+    }
+    notify_change(doc, op->type, op->id, 0, before_id);
+  } break;
   case ptk_anm2_op_selector_remove:
-    notify_change(doc, op->type, op->sel_idx, 0, 0, 0, 0);
+  case ptk_anm2_op_selector_set_name:
+    notify_change(doc, op->type, op->id, 0, 0);
     break;
-  case ptk_anm2_op_selector_set_group:
-    notify_change(doc, op->type, op->sel_idx, 0, 0, 0, 0);
-    break;
-  case ptk_anm2_op_selector_move:
-    // Moved from op->sel_idx to op->move_to_idx
-    notify_change(doc, op->type, op->sel_idx, 0, 0, op->move_to_idx, 0);
-    break;
-  case ptk_anm2_op_item_insert:
+  case ptk_anm2_op_selector_move: {
+    size_t idx = 0;
+    uint32_t before_id = 0;
+    if (ptk_anm2_find_selector(doc, op->id, &idx)) {
+      before_id = get_selector_before_id(doc, idx);
+    }
+    notify_change(doc, op->type, op->id, 0, before_id);
+  } break;
+  case ptk_anm2_op_item_insert: {
+    size_t sel_idx = 0;
+    size_t item_idx = 0;
+    uint32_t before_id = 0;
+    if (ptk_anm2_find_item(doc, op->id, &sel_idx, &item_idx)) {
+      before_id = get_item_before_id(&doc->selectors[sel_idx], item_idx);
+    }
+    notify_change(doc, op->type, op->id, op->parent_id, before_id);
+  } break;
   case ptk_anm2_op_item_remove:
-    notify_change(doc, op->type, op->sel_idx, op->item_idx, 0, 0, 0);
+    notify_change(doc, op->type, op->id, op->parent_id, 0);
     break;
   case ptk_anm2_op_item_set_name:
   case ptk_anm2_op_item_set_value:
   case ptk_anm2_op_item_set_script_name:
-    notify_change(doc, op->type, op->sel_idx, op->item_idx, 0, 0, 0);
+    notify_change(doc, op->type, op->id, 0, 0);
     break;
-  case ptk_anm2_op_item_move:
-    // Moved from (op->sel_idx, op->item_idx) to (op->move_to_sel_idx, op->move_to_idx)
-    notify_change(doc, op->type, op->sel_idx, op->item_idx, 0, op->move_to_sel_idx, op->move_to_idx);
-    break;
-  case ptk_anm2_op_param_insert:
+  case ptk_anm2_op_item_move: {
+    size_t sel_idx = 0;
+    size_t item_idx = 0;
+    uint32_t before_id = 0;
+    if (ptk_anm2_find_item(doc, op->id, &sel_idx, &item_idx)) {
+      before_id = get_item_before_id(&doc->selectors[sel_idx], item_idx);
+    }
+    notify_change(doc, op->type, op->id, op->parent_id, before_id);
+  } break;
+  case ptk_anm2_op_param_insert: {
+    size_t sel_idx = 0, item_idx = 0, param_idx = 0;
+    uint32_t before_id = 0;
+    if (ptk_anm2_find_param(doc, op->id, &sel_idx, &item_idx, &param_idx)) {
+      before_id = get_param_before_id(&doc->selectors[sel_idx].items[item_idx], param_idx);
+    }
+    notify_change(doc, op->type, op->id, op->parent_id, before_id);
+  } break;
   case ptk_anm2_op_param_remove:
-    notify_change(doc, op->type, op->sel_idx, op->item_idx, op->param_idx, 0, 0);
+    notify_change(doc, op->type, op->id, op->parent_id, 0);
     break;
   case ptk_anm2_op_param_set_key:
   case ptk_anm2_op_param_set_value:
-    notify_change(doc, op->type, op->sel_idx, op->item_idx, op->param_idx, 0, 0);
+    notify_change(doc, op->type, op->id, 0, 0);
     break;
-  case ptk_anm2_op_group_begin:
-  case ptk_anm2_op_group_end:
-    notify_change(doc, op->type, 0, 0, 0, 0, 0);
+  case ptk_anm2_op_transaction_begin:
+  case ptk_anm2_op_transaction_end:
+    notify_change(doc, op->type, 0, 0, 0);
     break;
   case ptk_anm2_op_reset:
-    // RESET is not used in apply_op, only for direct notification
     break;
   }
 
@@ -1602,6 +1660,7 @@ bool ptk_anm2_set_label(struct ptk_anm2 *doc, char const *label, struct ov_error
 
   // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -1650,6 +1709,7 @@ bool ptk_anm2_set_psd_path(struct ptk_anm2 *doc, char const *path, struct ov_err
 
   // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -1700,6 +1760,7 @@ bool ptk_anm2_set_exclusive_support_default(struct ptk_anm2 *doc,
 
   // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -1752,6 +1813,7 @@ bool ptk_anm2_set_information(struct ptk_anm2 *doc, char const *information, str
 
   // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -1768,10 +1830,6 @@ int ptk_anm2_get_version(struct ptk_anm2 const *doc) {
   return doc->version;
 }
 
-// ============================================================================
-// Selector operations (stub implementations)
-// ============================================================================
-
 size_t ptk_anm2_selector_count(struct ptk_anm2 const *doc) {
   if (!doc || !doc->selectors) {
     return 0;
@@ -1779,7 +1837,8 @@ size_t ptk_anm2_selector_count(struct ptk_anm2 const *doc) {
   return OV_ARRAY_LENGTH(doc->selectors);
 }
 
-uint32_t ptk_anm2_selector_add(struct ptk_anm2 *doc, char const *group, struct ov_error *const err) {
+uint32_t
+ptk_anm2_selector_insert(struct ptk_anm2 *doc, uint32_t before_id, char const *name, struct ov_error *const err) {
   if (!doc) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return 0;
@@ -1791,9 +1850,9 @@ uint32_t ptk_anm2_selector_add(struct ptk_anm2 *doc, char const *group, struct o
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Use default name if group is empty or NULL
-  char const *effective_group =
-      (group && group[0] != '\0') ? group : pgettext(".ptk.anm2 default selector name", "Unnamed Selector");
+  // Use default name if name is empty or NULL
+  char const *effective_name =
+      (name && name[0] != '\0') ? name : pgettext(".ptk.anm2 default selector name", "Unnamed Selector");
 
   // Allocate and initialize new selector
   if (!OV_REALLOC(&new_sel, 1, sizeof(struct selector))) {
@@ -1804,18 +1863,18 @@ uint32_t ptk_anm2_selector_add(struct ptk_anm2 *doc, char const *group, struct o
   new_sel->id = generate_id(doc);
   new_id = new_sel->id;
 
-  // Copy group name
-  if (!strdup_to_array(&new_sel->group, effective_group, err)) {
+  // Copy name
+  if (!strdup_to_array(&new_sel->name, effective_name, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
   // Build INSERT operation
   {
-    size_t const idx = OV_ARRAY_LENGTH(doc->selectors);
     op.type = ptk_anm2_op_selector_insert;
-    op.sel_idx = idx;
+    op.before_id = before_id; // Use before_id for position
     op.removed_data = new_sel;
+    op.id = new_id;
     new_sel = NULL; // ownership transferred to op
   }
 
@@ -1834,6 +1893,7 @@ uint32_t ptk_anm2_selector_add(struct ptk_anm2 *doc, char const *group, struct o
 
   // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   result_id = new_id;
 
@@ -1847,12 +1907,13 @@ cleanup:
   return result_id;
 }
 
-bool ptk_anm2_selector_remove(struct ptk_anm2 *doc, size_t idx, struct ov_error *const err) {
+bool ptk_anm2_selector_remove(struct ptk_anm2 *doc, uint32_t id, struct ov_error *const err) {
   if (!doc) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  if (!doc->selectors || idx >= OV_ARRAY_LENGTH(doc->selectors)) {
+  size_t idx = 0;
+  if (!ptk_anm2_find_selector(doc, id, &idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
@@ -1861,25 +1922,22 @@ bool ptk_anm2_selector_remove(struct ptk_anm2 *doc, size_t idx, struct ov_error 
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Build REMOVE operation
   op.type = ptk_anm2_op_selector_remove;
-  op.sel_idx = idx;
+  op.id = id;
 
-  // Apply the operation (removes the selector, reverse_op will contain the data)
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -1889,22 +1947,21 @@ cleanup:
   return success;
 }
 
-char const *ptk_anm2_selector_get_group(struct ptk_anm2 const *doc, size_t idx) {
-  if (!doc || !doc->selectors) {
+char const *ptk_anm2_selector_get_name(struct ptk_anm2 const *doc, uint32_t id) {
+  size_t idx = 0;
+  if (!ptk_anm2_find_selector(doc, id, &idx)) {
     return NULL;
   }
-  if (idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    return NULL;
-  }
-  return doc->selectors[idx].group;
+  return doc->selectors[idx].name;
 }
 
-bool ptk_anm2_selector_set_group(struct ptk_anm2 *doc, size_t idx, char const *group, struct ov_error *const err) {
+bool ptk_anm2_selector_set_name(struct ptk_anm2 *doc, uint32_t id, char const *name, struct ov_error *const err) {
   if (!doc) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  if (!doc->selectors || idx >= OV_ARRAY_LENGTH(doc->selectors)) {
+  size_t idx = 0;
+  if (!ptk_anm2_find_selector(doc, id, &idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
@@ -1913,29 +1970,26 @@ bool ptk_anm2_selector_set_group(struct ptk_anm2 *doc, size_t idx, char const *g
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Build SET_GROUP operation
-  if (!strdup_to_array(&op.str_data, group, err)) {
+  if (!strdup_to_array(&op.str_data, name, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  op.type = ptk_anm2_op_selector_set_group;
-  op.sel_idx = idx;
+  op.type = ptk_anm2_op_selector_set_name;
+  op.id = id;
 
-  // Apply the operation
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -1945,7 +1999,7 @@ cleanup:
   return success;
 }
 
-bool ptk_anm2_selector_move_to(struct ptk_anm2 *doc, size_t from_idx, size_t to_idx, struct ov_error *const err) {
+bool ptk_anm2_selector_move(struct ptk_anm2 *doc, uint32_t id, uint32_t before_id, struct ov_error *const err) {
   if (!doc) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
@@ -1954,36 +2008,55 @@ bool ptk_anm2_selector_move_to(struct ptk_anm2 *doc, size_t from_idx, size_t to_
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  size_t const len = OV_ARRAY_LENGTH(doc->selectors);
-  if (from_idx >= len || to_idx >= len) {
+
+  size_t from_idx = 0;
+  if (!ptk_anm2_find_selector(doc, id, &from_idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
+  }
+
+  size_t const len = OV_ARRAY_LENGTH(doc->selectors);
+  size_t to_idx = len;
+  if (before_id != 0) {
+    size_t before_idx = 0;
+    if (ptk_anm2_find_selector(doc, before_id, &before_idx)) {
+      to_idx = before_idx;
+    }
+  }
+
+  if (from_idx < to_idx) {
+    to_idx--;
+  }
+
+  if (to_idx >= len) {
+    to_idx = len - 1;
+  }
+
+  if (from_idx == to_idx) {
+    return true;
   }
 
   bool success = false;
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Build MOVE operation
   op.type = ptk_anm2_op_selector_move;
-  op.sel_idx = from_idx;
-  op.move_to_idx = to_idx;
+  op.id = id;
+  op.before_id = before_id;
 
-  // Apply the operation
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -1993,11 +2066,44 @@ cleanup:
   return success;
 }
 
-// ============================================================================
-// Item operations (stub implementations)
-// ============================================================================
+bool ptk_anm2_selector_would_move(struct ptk_anm2 const *doc, uint32_t id, uint32_t before_id) {
+  if (!doc || !doc->selectors) {
+    return false;
+  }
 
-size_t ptk_anm2_item_count(struct ptk_anm2 const *doc, size_t sel_idx) {
+  // Find the source selector
+  size_t from_idx = 0;
+  if (!ptk_anm2_find_selector(doc, id, &from_idx)) {
+    return false;
+  }
+
+  // Determine target index (same logic as ptk_anm2_selector_move)
+  size_t const len = OV_ARRAY_LENGTH(doc->selectors);
+  size_t to_idx = len; // Default: end
+  if (before_id != 0) {
+    size_t before_idx = 0;
+    if (ptk_anm2_find_selector(doc, before_id, &before_idx)) {
+      to_idx = before_idx;
+    }
+  }
+
+  // Adjust target if source is before target (moving forward)
+  if (from_idx < to_idx) {
+    to_idx--;
+  }
+
+  if (to_idx >= len) {
+    to_idx = len - 1;
+  }
+
+  if (from_idx == to_idx) {
+    return false; // No-op
+  }
+
+  return true; // Would actually move
+}
+
+static size_t item_count(struct ptk_anm2 const *doc, size_t sel_idx) {
   if (!doc || !doc->selectors) {
     return 0;
   }
@@ -2011,7 +2117,18 @@ size_t ptk_anm2_item_count(struct ptk_anm2 const *doc, size_t sel_idx) {
   return OV_ARRAY_LENGTH(sel->items);
 }
 
-bool ptk_anm2_item_is_animation(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx) {
+size_t ptk_anm2_item_count(struct ptk_anm2 const *doc, uint32_t selector_id) {
+  if (!doc || !doc->selectors) {
+    return 0;
+  }
+  size_t sel_idx = 0;
+  if (!ptk_anm2_find_selector(doc, selector_id, &sel_idx)) {
+    return 0;
+  }
+  return item_count(doc, sel_idx);
+}
+
+static bool item_is_animation(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx) {
   if (!doc || !doc->selectors) {
     return false;
   }
@@ -2025,15 +2142,37 @@ bool ptk_anm2_item_is_animation(struct ptk_anm2 const *doc, size_t sel_idx, size
   return sel->items[item_idx].script_name != NULL;
 }
 
-uint32_t ptk_anm2_item_add_value(
-    struct ptk_anm2 *doc, size_t sel_idx, char const *name, char const *value, struct ov_error *const err) {
-  if (!doc) {
+bool ptk_anm2_item_is_animation(struct ptk_anm2 const *doc, uint32_t id) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  if (!ptk_anm2_find_item(doc, id, &sel_idx, &item_idx)) {
+    return false;
+  }
+  return item_is_animation(doc, sel_idx, item_idx);
+}
+
+uint32_t ptk_anm2_item_insert_value(
+    struct ptk_anm2 *doc, uint32_t before_id, char const *name, char const *value, struct ov_error *const err) {
+  if (!doc || before_id == 0) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return 0;
   }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
+
+  size_t sel_idx = 0;
+  uint32_t selector_id = 0;
+  uint32_t item_before_id = 0;
+
+  if (ptk_anm2_find_selector(doc, before_id, &sel_idx)) {
+    selector_id = before_id;
+    item_before_id = 0;
+  } else {
+    size_t item_idx = 0;
+    if (!ptk_anm2_find_item(doc, before_id, &sel_idx, &item_idx)) {
+      OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+      return 0;
+    }
+    selector_id = doc->selectors[sel_idx].id;
+    item_before_id = before_id;
   }
 
   uint32_t result_id = 0;
@@ -2041,9 +2180,7 @@ uint32_t ptk_anm2_item_add_value(
   struct item *new_item = NULL;
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
-  struct selector *sel = &doc->selectors[sel_idx];
 
-  // Allocate and initialize new item
   if (!OV_REALLOC(&new_item, 1, sizeof(struct item))) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
     goto cleanup;
@@ -2052,127 +2189,36 @@ uint32_t ptk_anm2_item_add_value(
   new_item->id = generate_id(doc);
   new_id = new_item->id;
 
-  // Copy name
   if (!strdup_to_array(&new_item->name, name, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Copy value
   if (!strdup_to_array(&new_item->value, value, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Build INSERT operation
-  {
-    size_t const idx = OV_ARRAY_LENGTH(sel->items);
-    op.type = ptk_anm2_op_item_insert;
-    op.sel_idx = sel_idx;
-    op.item_idx = idx;
-    op.removed_data = new_item;
-    new_item = NULL; // ownership transferred to op
-  }
-
-  // Apply the operation
-  if (!apply_op(doc, &op, &reverse_op, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-
-  // Push reverse operation to undo stack
-  if (!push_undo_op(doc, &reverse_op, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
-
-  // Clear redo stack
-  clear_redo_stack(doc);
-
-  result_id = new_id;
-
-cleanup:
-  if (new_item) {
-    item_free(new_item);
-    OV_FREE(&new_item);
-  }
-  op_free(&op);
-  op_free(&reverse_op);
-  return result_id;
-}
-
-uint32_t ptk_anm2_item_insert_value(struct ptk_anm2 *doc,
-                                    size_t sel_idx,
-                                    size_t item_idx,
-                                    char const *name,
-                                    char const *value,
-                                    struct ov_error *const err) {
-  if (!doc) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
-  }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
-  }
-
-  uint32_t result_id = 0;
-  uint32_t new_id = 0;
-  struct item *new_item = NULL;
-  struct ptk_anm2_op op = {0};
-  struct ptk_anm2_op reverse_op = {0};
-  struct selector *sel = &doc->selectors[sel_idx];
-  size_t const len = OV_ARRAY_LENGTH(sel->items);
-
-  if (item_idx > len) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
-  }
-
-  // Allocate and initialize new item
-  if (!OV_REALLOC(&new_item, 1, sizeof(struct item))) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
-    goto cleanup;
-  }
-  memset(new_item, 0, sizeof(struct item));
-  new_item->id = generate_id(doc);
-  new_id = new_item->id;
-
-  // Copy name
-  if (!strdup_to_array(&new_item->name, name, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-
-  // Copy value
-  if (!strdup_to_array(&new_item->value, value, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-
-  // Build INSERT operation
   op.type = ptk_anm2_op_item_insert;
-  op.sel_idx = sel_idx;
-  op.item_idx = item_idx;
+  op.before_id = item_before_id;
   op.removed_data = new_item;
-  new_item = NULL; // ownership transferred to op
+  op.id = new_id;
+  op.parent_id = selector_id;
+  new_item = NULL;
 
-  // Apply the operation
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   result_id = new_id;
 
@@ -2186,15 +2232,28 @@ cleanup:
   return result_id;
 }
 
-uint32_t ptk_anm2_item_add_animation(
-    struct ptk_anm2 *doc, size_t sel_idx, char const *script_name, char const *name, struct ov_error *const err) {
-  if (!doc) {
+uint32_t ptk_anm2_item_insert_animation(
+    struct ptk_anm2 *doc, uint32_t before_id, char const *script_name, char const *name, struct ov_error *const err) {
+  if (!doc || before_id == 0) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return 0;
   }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
+
+  size_t sel_idx = 0;
+  uint32_t selector_id = 0;
+  uint32_t item_before_id = 0;
+
+  if (ptk_anm2_find_selector(doc, before_id, &sel_idx)) {
+    selector_id = before_id;
+    item_before_id = 0;
+  } else {
+    size_t item_idx = 0;
+    if (!ptk_anm2_find_item(doc, before_id, &sel_idx, &item_idx)) {
+      OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+      return 0;
+    }
+    selector_id = doc->selectors[sel_idx].id;
+    item_before_id = before_id;
   }
 
   uint32_t result_id = 0;
@@ -2202,9 +2261,7 @@ uint32_t ptk_anm2_item_add_animation(
   struct item *new_item = NULL;
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
-  struct selector *sel = &doc->selectors[sel_idx];
 
-  // Allocate and initialize new item
   if (!OV_REALLOC(&new_item, 1, sizeof(struct item))) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
     goto cleanup;
@@ -2213,128 +2270,36 @@ uint32_t ptk_anm2_item_add_animation(
   new_item->id = generate_id(doc);
   new_id = new_item->id;
 
-  // Copy script_name
   if (!strdup_to_array(&new_item->script_name, script_name, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Copy name
   if (!strdup_to_array(&new_item->name, name, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Build INSERT operation
-  {
-    size_t const idx = OV_ARRAY_LENGTH(sel->items);
-    op.type = ptk_anm2_op_item_insert;
-    op.sel_idx = sel_idx;
-    op.item_idx = idx;
-    op.removed_data = new_item;
-    new_item = NULL; // ownership transferred to op
-  }
-
-  // Apply the operation
-  if (!apply_op(doc, &op, &reverse_op, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-
-  // Push reverse operation to undo stack
-  if (!push_undo_op(doc, &reverse_op, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
-
-  // Clear redo stack
-  clear_redo_stack(doc);
-
-  result_id = new_id;
-
-cleanup:
-  if (new_item) {
-    item_free(new_item);
-    OV_FREE(&new_item);
-  }
-  op_free(&op);
-  op_free(&reverse_op);
-  return result_id;
-}
-
-uint32_t ptk_anm2_item_insert_animation(struct ptk_anm2 *doc,
-                                        size_t sel_idx,
-                                        size_t item_idx,
-                                        char const *script_name,
-                                        char const *name,
-                                        struct ov_error *const err) {
-  if (!doc) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
-  }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
-  }
-
-  uint32_t result_id = 0;
-  uint32_t new_id = 0;
-  struct item *new_item = NULL;
-  struct ptk_anm2_op op = {0};
-  struct ptk_anm2_op reverse_op = {0};
-  struct selector *sel = &doc->selectors[sel_idx];
-  size_t const len = OV_ARRAY_LENGTH(sel->items);
-
-  // item_idx must be <= len (insert at end is allowed)
-  if (item_idx > len) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
-  }
-
-  // Allocate and initialize new item
-  if (!OV_REALLOC(&new_item, 1, sizeof(struct item))) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
-    goto cleanup;
-  }
-  memset(new_item, 0, sizeof(struct item));
-  new_item->id = generate_id(doc);
-  new_id = new_item->id;
-
-  // Copy script_name
-  if (!strdup_to_array(&new_item->script_name, script_name, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-
-  // Copy name
-  if (!strdup_to_array(&new_item->name, name, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-
-  // Build INSERT operation
   op.type = ptk_anm2_op_item_insert;
-  op.sel_idx = sel_idx;
-  op.item_idx = item_idx;
+  op.before_id = item_before_id;
   op.removed_data = new_item;
-  new_item = NULL; // ownership transferred to op
+  op.id = new_id;
+  op.parent_id = selector_id;
+  new_item = NULL;
 
-  // Apply the operation
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   result_id = new_id;
 
@@ -2348,18 +2313,14 @@ cleanup:
   return result_id;
 }
 
-bool ptk_anm2_item_remove(struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, struct ov_error *const err) {
+bool ptk_anm2_item_remove(struct ptk_anm2 *doc, uint32_t item_id, struct ov_error *const err) {
   if (!doc) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-
-  struct selector *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  if (!ptk_anm2_find_item(doc, item_id, &sel_idx, &item_idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
@@ -2368,26 +2329,23 @@ bool ptk_anm2_item_remove(struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx,
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Build REMOVE operation
   op.type = ptk_anm2_op_item_remove;
-  op.sel_idx = sel_idx;
-  op.item_idx = item_idx;
+  op.id = item_id;
+  op.parent_id = doc->selectors[sel_idx].id;
 
-  // Apply the operation (removes the item, reverse_op will contain the data)
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation (INSERT) to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -2397,114 +2355,158 @@ cleanup:
   return success;
 }
 
-bool ptk_anm2_item_move_to(struct ptk_anm2 *doc,
-                           size_t from_sel_idx,
-                           size_t from_idx,
-                           size_t to_sel_idx,
-                           size_t to_idx,
-                           struct ov_error *const err) {
-  if (!doc) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  if (!doc->selectors || from_sel_idx >= OV_ARRAY_LENGTH(doc->selectors) ||
-      to_sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
+bool ptk_anm2_item_move(struct ptk_anm2 *doc, uint32_t id, uint32_t before_id, struct ov_error *const err) {
+  if (!doc || before_id == 0) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
 
-  struct selector *from_sel = &doc->selectors[from_sel_idx];
-  if (!from_sel->items) {
+  size_t from_sel_idx = 0;
+  size_t from_idx = 0;
+  if (!ptk_anm2_find_item(doc, id, &from_sel_idx, &from_idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
 
-  size_t const from_len = OV_ARRAY_LENGTH(from_sel->items);
-  if (from_idx >= from_len) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
+  uint32_t dest_selector_id = 0;
+  uint32_t item_before_id = 0;
 
-  // Same selector move: to_idx must be < len
-  if (from_sel_idx == to_sel_idx) {
-    if (to_idx >= from_len) {
+  size_t before_sel_idx = 0;
+  if (ptk_anm2_find_selector(doc, before_id, &before_sel_idx)) {
+    dest_selector_id = before_id;
+    item_before_id = 0;
+  } else {
+    size_t before_item_sel_idx = 0;
+    size_t before_item_idx = 0;
+    if (!ptk_anm2_find_item(doc, before_id, &before_item_sel_idx, &before_item_idx)) {
       OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
       return false;
     }
-    if (from_idx == to_idx) {
-      return true; // No-op
+    dest_selector_id = doc->selectors[before_item_sel_idx].id;
+    item_before_id = before_id;
+  }
+
+  size_t to_sel_idx = 0;
+  if (!ptk_anm2_find_selector(doc, dest_selector_id, &to_sel_idx)) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    return false;
+  }
+
+  size_t const from_len = OV_ARRAY_LENGTH(doc->selectors[from_sel_idx].items);
+  size_t const to_len = OV_ARRAY_LENGTH(doc->selectors[to_sel_idx].items);
+
+  size_t to_idx = to_len;
+  if (item_before_id != 0) {
+    size_t tmp_sel_idx = 0;
+    size_t tmp_idx = 0;
+    if (!ptk_anm2_find_item(doc, item_before_id, &tmp_sel_idx, &tmp_idx) || tmp_sel_idx != to_sel_idx) {
+      OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+      return false;
+    }
+    to_idx = tmp_idx;
+  }
+
+  if (from_sel_idx == to_sel_idx) {
+    if (from_idx == to_idx || (item_before_id == 0 && from_idx == from_len - 1)) {
+      return true;
+    }
+  }
+
+  bool success = false;
+  struct ptk_anm2_op op = {0};
+  struct ptk_anm2_op reverse_op = {0};
+
+  op.type = ptk_anm2_op_item_move;
+  op.id = id;
+  op.parent_id = dest_selector_id;
+  op.before_id = item_before_id;
+
+  if (!apply_op(doc, &op, &reverse_op, err)) {
+    OV_ERROR_ADD_TRACE(err);
+    goto cleanup;
+  }
+
+  if (!push_undo_op(doc, &reverse_op, err)) {
+    OV_ERROR_ADD_TRACE(err);
+    goto cleanup;
+  }
+  memset(&reverse_op, 0, sizeof(reverse_op));
+
+  clear_redo_stack(doc);
+  notify_state(doc);
+
+  success = true;
+
+cleanup:
+  op_free(&op);
+  op_free(&reverse_op);
+  return success;
+}
+
+bool ptk_anm2_item_would_move(struct ptk_anm2 const *doc, uint32_t id, uint32_t before_id) {
+  if (!doc || before_id == 0) {
+    return false;
+  }
+
+  // Find the item to move
+  size_t from_sel_idx = 0;
+  size_t from_idx = 0;
+  if (!ptk_anm2_find_item(doc, id, &from_sel_idx, &from_idx)) {
+    return false;
+  }
+
+  // Determine destination based on before_id (same logic as ptk_anm2_item_move)
+  size_t to_sel_idx = 0;
+  size_t to_idx = 0;
+
+  // Check if before_id is a selector ID (move to end)
+  size_t before_sel_idx = 0;
+  if (ptk_anm2_find_selector(doc, before_id, &before_sel_idx)) {
+    to_sel_idx = before_sel_idx;
+    to_idx = OV_ARRAY_LENGTH(doc->selectors[before_sel_idx].items);
+    // Adjust if moving within same selector
+    if (from_sel_idx == before_sel_idx) {
+      to_idx--;
     }
   } else {
-    // Cross-selector move: to_idx can be <= to_len (insert at end allowed)
-    struct selector *to_sel = &doc->selectors[to_sel_idx];
-    size_t const to_len = OV_ARRAY_LENGTH(to_sel->items);
-    if (to_idx > to_len) {
-      OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    // before_id must be an item ID - insert before it
+    size_t before_item_idx = 0;
+    if (!ptk_anm2_find_item(doc, before_id, &to_sel_idx, &before_item_idx)) {
       return false;
+    }
+    to_idx = before_item_idx;
+    // If moving within same selector and source is before destination,
+    // the destination index will be reduced by 1 after source removal
+    if (from_sel_idx == to_sel_idx && from_idx < before_item_idx) {
+      to_idx--;
     }
   }
 
-  bool success = false;
-  struct ptk_anm2_op op = {0};
-  struct ptk_anm2_op reverse_op = {0};
-
-  // Build MOVE operation
-  op.type = ptk_anm2_op_item_move;
-  op.sel_idx = from_sel_idx;
-  op.item_idx = from_idx;
-  op.move_to_sel_idx = to_sel_idx;
-  op.move_to_idx = to_idx;
-
-  // Apply the operation
-  if (!apply_op(doc, &op, &reverse_op, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
+  // Check if move would be a no-op
+  if (from_sel_idx == to_sel_idx && from_idx == to_idx) {
+    return false; // No-op
   }
 
-  // Push reverse operation to undo stack
-  if (!push_undo_op(doc, &reverse_op, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
-
-  // Clear redo stack
-  clear_redo_stack(doc);
-
-  success = true;
-
-cleanup:
-  op_free(&op);
-  op_free(&reverse_op);
-  return success;
+  return true; // Would actually move
 }
 
-char const *ptk_anm2_item_get_name(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx) {
-  if (!doc || !doc->selectors) {
+char const *ptk_anm2_item_get_name(struct ptk_anm2 const *doc, uint32_t item_id) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  if (!ptk_anm2_find_item(doc, item_id, &sel_idx, &item_idx)) {
     return NULL;
   }
-  if (sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    return NULL;
-  }
-  struct selector const *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    return NULL;
-  }
-  return sel->items[item_idx].name;
+  return doc->selectors[sel_idx].items[item_idx].name;
 }
 
-bool ptk_anm2_item_set_name(
-    struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, char const *name, struct ov_error *const err) {
+bool ptk_anm2_item_set_name(struct ptk_anm2 *doc, uint32_t item_id, char const *name, struct ov_error *const err) {
   if (!doc) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  struct selector *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  if (!ptk_anm2_find_item(doc, item_id, &sel_idx, &item_idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
@@ -2513,30 +2515,26 @@ bool ptk_anm2_item_set_name(
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Build SET_NAME operation
   if (!strdup_to_array(&op.str_data, name, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
   op.type = ptk_anm2_op_item_set_name;
-  op.sel_idx = sel_idx;
-  op.item_idx = item_idx;
+  op.id = item_id;
 
-  // Apply the operation
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -2546,17 +2544,13 @@ cleanup:
   return success;
 }
 
-char const *ptk_anm2_item_get_value(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx) {
-  if (!doc || !doc->selectors) {
-    return NULL;
-  }
-  if (sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
+char const *ptk_anm2_item_get_value(struct ptk_anm2 const *doc, uint32_t item_id) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  if (!ptk_anm2_find_item(doc, item_id, &sel_idx, &item_idx)) {
     return NULL;
   }
   struct selector const *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    return NULL;
-  }
   // Return NULL for animation items
   if (sel->items[item_idx].script_name != NULL) {
     return NULL;
@@ -2564,23 +2558,18 @@ char const *ptk_anm2_item_get_value(struct ptk_anm2 const *doc, size_t sel_idx, 
   return sel->items[item_idx].value;
 }
 
-bool ptk_anm2_item_set_value(
-    struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, char const *value, struct ov_error *const err) {
+bool ptk_anm2_item_set_value(struct ptk_anm2 *doc, uint32_t item_id, char const *value, struct ov_error *const err) {
   if (!doc) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  if (!ptk_anm2_find_item(doc, item_id, &sel_idx, &item_idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  struct selector *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  // Cannot set value on animation items
-  if (sel->items[item_idx].script_name != NULL) {
+  if (doc->selectors[sel_idx].items[item_idx].script_name != NULL) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
@@ -2589,30 +2578,26 @@ bool ptk_anm2_item_set_value(
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Build SET_VALUE operation
   if (!strdup_to_array(&op.str_data, value, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
   op.type = ptk_anm2_op_item_set_value;
-  op.sel_idx = sel_idx;
-  op.item_idx = item_idx;
+  op.id = item_id;
 
-  // Apply the operation
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -2622,37 +2607,30 @@ cleanup:
   return success;
 }
 
-char const *ptk_anm2_item_get_script_name(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx) {
-  if (!doc || !doc->selectors) {
+char const *ptk_anm2_item_get_script_name(struct ptk_anm2 const *doc, uint32_t item_id) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  if (!ptk_anm2_find_item(doc, item_id, &sel_idx, &item_idx)) {
     return NULL;
   }
-  if (sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    return NULL;
-  }
-  struct selector const *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    return NULL;
-  }
-  return sel->items[item_idx].script_name;
+  return doc->selectors[sel_idx].items[item_idx].script_name;
 }
 
-bool ptk_anm2_item_set_script_name(
-    struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, char const *script_name, struct ov_error *const err) {
+bool ptk_anm2_item_set_script_name(struct ptk_anm2 *doc,
+                                   uint32_t item_id,
+                                   char const *script_name,
+                                   struct ov_error *const err) {
   if (!doc) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  if (!ptk_anm2_find_item(doc, item_id, &sel_idx, &item_idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  struct selector *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  // Cannot set script_name on value items (script_name is NULL for value items)
-  if (sel->items[item_idx].script_name == NULL) {
+  if (doc->selectors[sel_idx].items[item_idx].script_name == NULL) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
@@ -2661,30 +2639,26 @@ bool ptk_anm2_item_set_script_name(
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Build SET_SCRIPT_NAME operation
   if (!strdup_to_array(&op.str_data, script_name, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
   op.type = ptk_anm2_op_item_set_script_name;
-  op.sel_idx = sel_idx;
-  op.item_idx = item_idx;
+  op.id = item_id;
 
-  // Apply the operation
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -2694,22 +2668,13 @@ cleanup:
   return success;
 }
 
-// ============================================================================
-// Parameter operations (stub implementations)
-// ============================================================================
-
-size_t ptk_anm2_param_count(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx) {
-  if (!doc || !doc->selectors) {
+size_t ptk_anm2_param_count(struct ptk_anm2 const *doc, uint32_t item_id) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  if (!ptk_anm2_find_item(doc, item_id, &sel_idx, &item_idx)) {
     return 0;
   }
-  if (sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    return 0;
-  }
-  struct selector const *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    return 0;
-  }
-  struct item const *it = &sel->items[item_idx];
+  struct item const *it = &doc->selectors[sel_idx].items[item_idx];
   // Value items have no params
   if (it->script_name == NULL || !it->params) {
     return 0;
@@ -2717,105 +2682,9 @@ size_t ptk_anm2_param_count(struct ptk_anm2 const *doc, size_t sel_idx, size_t i
   return OV_ARRAY_LENGTH(it->params);
 }
 
-uint32_t ptk_anm2_param_add(struct ptk_anm2 *doc,
-                            size_t sel_idx,
-                            size_t item_idx,
-                            char const *key,
-                            char const *value,
-                            struct ov_error *const err) {
-  if (!doc) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
-  }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
-  }
-  struct selector *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
-  }
-  struct item *it = &sel->items[item_idx];
-  // Cannot add params to value items
-  if (it->script_name == NULL) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
-  }
-
-  uint32_t result_id = 0;
-  uint32_t new_id = 0;
-  struct param *new_param = NULL;
-  struct ptk_anm2_op op = {0};
-  struct ptk_anm2_op reverse_op = {0};
-
-  // Allocate and initialize new param
-  if (!OV_REALLOC(&new_param, 1, sizeof(struct param))) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
-    goto cleanup;
-  }
-  memset(new_param, 0, sizeof(struct param));
-  new_param->id = generate_id(doc);
-  new_id = new_param->id;
-
-  // Create the param
-  if (!strdup_to_array(&new_param->key, key, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-  if (!strdup_to_array(&new_param->value, value, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-
-  // Build INSERT operation
-  {
-    size_t const len = OV_ARRAY_LENGTH(it->params);
-    op.type = ptk_anm2_op_param_insert;
-    op.sel_idx = sel_idx;
-    op.item_idx = item_idx;
-    op.param_idx = len;
-    op.removed_data = new_param;
-    new_param = NULL; // ownership transferred to op
-  }
-
-  // Apply the operation
-  if (!apply_op(doc, &op, &reverse_op, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-
-  // Push reverse operation to undo stack
-  if (!push_undo_op(doc, &reverse_op, err)) {
-    OV_ERROR_ADD_TRACE(err);
-    goto cleanup;
-  }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
-
-  // Clear redo stack
-  clear_redo_stack(doc);
-
-  result_id = new_id;
-
-cleanup:
-  if (new_param) {
-    if (new_param->key) {
-      OV_ARRAY_DESTROY(&new_param->key);
-    }
-    if (new_param->value) {
-      OV_ARRAY_DESTROY(&new_param->value);
-    }
-    OV_FREE(&new_param);
-  }
-  op_free(&op);
-  op_free(&reverse_op);
-  return result_id;
-}
-
 uint32_t ptk_anm2_param_insert(struct ptk_anm2 *doc,
-                               size_t sel_idx,
-                               size_t item_idx,
-                               size_t param_idx,
+                               uint32_t item_id,
+                               uint32_t before_param_id,
                                char const *key,
                                char const *value,
                                struct ov_error *const err) {
@@ -2823,27 +2692,27 @@ uint32_t ptk_anm2_param_insert(struct ptk_anm2 *doc,
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return 0;
   }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  if (!ptk_anm2_find_item(doc, item_id, &sel_idx, &item_idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return 0;
   }
-  struct selector *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
-  }
-  struct item *it = &sel->items[item_idx];
-  // Cannot add params to value items
+  struct item *it = &doc->selectors[sel_idx].items[item_idx];
   if (it->script_name == NULL) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return 0;
   }
 
-  size_t const len = OV_ARRAY_LENGTH(it->params);
-  // Allow inserting at end (param_idx == len)
-  if (param_idx > len) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return 0;
+  if (before_param_id != 0) {
+    size_t found_sel_idx = 0;
+    size_t found_item_idx = 0;
+    size_t found_param_idx = 0;
+    if (!ptk_anm2_find_param(doc, before_param_id, &found_sel_idx, &found_item_idx, &found_param_idx) ||
+        found_sel_idx != sel_idx || found_item_idx != item_idx) {
+      OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+      return 0;
+    }
   }
 
   uint32_t result_id = 0;
@@ -2852,7 +2721,6 @@ uint32_t ptk_anm2_param_insert(struct ptk_anm2 *doc,
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Allocate and initialize new param
   if (!OV_REALLOC(&new_param, 1, sizeof(struct param))) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
     goto cleanup;
@@ -2861,7 +2729,6 @@ uint32_t ptk_anm2_param_insert(struct ptk_anm2 *doc,
   new_param->id = generate_id(doc);
   new_id = new_param->id;
 
-  // Create the param
   if (!strdup_to_array(&new_param->key, key, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
@@ -2871,29 +2738,26 @@ uint32_t ptk_anm2_param_insert(struct ptk_anm2 *doc,
     goto cleanup;
   }
 
-  // Build INSERT operation
   op.type = ptk_anm2_op_param_insert;
-  op.sel_idx = sel_idx;
-  op.item_idx = item_idx;
-  op.param_idx = param_idx;
+  op.before_id = before_param_id;
   op.removed_data = new_param;
-  new_param = NULL; // ownership transferred to op
+  op.id = new_id;
+  op.parent_id = item_id;
+  new_param = NULL;
 
-  // Apply the operation
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   result_id = new_id;
 
@@ -2912,57 +2776,41 @@ cleanup:
   return result_id;
 }
 
-bool ptk_anm2_param_remove(
-    struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, size_t param_idx, struct ov_error *const err) {
+bool ptk_anm2_param_remove(struct ptk_anm2 *doc, uint32_t param_id, struct ov_error *const err) {
   if (!doc) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  size_t param_idx = 0;
+  if (!ptk_anm2_find_param(doc, param_id, &sel_idx, &item_idx, &param_idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  struct selector *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  struct item *it = &sel->items[item_idx];
-  // Cannot remove params from value items
-  if (it->script_name == NULL) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  if (!it->params || param_idx >= OV_ARRAY_LENGTH(it->params)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
+  struct item *it = &doc->selectors[sel_idx].items[item_idx];
 
   bool success = false;
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Build REMOVE operation
   op.type = ptk_anm2_op_param_remove;
-  op.sel_idx = sel_idx;
-  op.item_idx = item_idx;
-  op.param_idx = param_idx;
+  op.id = param_id;
+  op.parent_id = it->id;
 
-  // Apply the operation (removes the param, reverse_op will contain the data)
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation (INSERT) to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -2972,45 +2820,25 @@ cleanup:
   return success;
 }
 
-char const *ptk_anm2_param_get_key(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx, size_t param_idx) {
-  if (!doc || !doc->selectors) {
+char const *ptk_anm2_param_get_key(struct ptk_anm2 const *doc, uint32_t param_id) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  size_t param_idx = 0;
+  if (!ptk_anm2_find_param(doc, param_id, &sel_idx, &item_idx, &param_idx)) {
     return NULL;
   }
-  if (sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    return NULL;
-  }
-  struct selector const *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    return NULL;
-  }
-  struct item const *it = &sel->items[item_idx];
-  if (!it->params || param_idx >= OV_ARRAY_LENGTH(it->params)) {
-    return NULL;
-  }
-  return it->params[param_idx].key;
+  return doc->selectors[sel_idx].items[item_idx].params[param_idx].key;
 }
 
-bool ptk_anm2_param_set_key(struct ptk_anm2 *doc,
-                            size_t sel_idx,
-                            size_t item_idx,
-                            size_t param_idx,
-                            char const *key,
-                            struct ov_error *const err) {
+bool ptk_anm2_param_set_key(struct ptk_anm2 *doc, uint32_t param_id, char const *key, struct ov_error *const err) {
   if (!doc) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  struct selector *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  struct item *it = &sel->items[item_idx];
-  if (!it->params || param_idx >= OV_ARRAY_LENGTH(it->params)) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  size_t param_idx = 0;
+  if (!ptk_anm2_find_param(doc, param_id, &sel_idx, &item_idx, &param_idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
@@ -3019,31 +2847,26 @@ bool ptk_anm2_param_set_key(struct ptk_anm2 *doc,
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Build SET_KEY operation
   if (!strdup_to_array(&op.str_data, key, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
   op.type = ptk_anm2_op_param_set_key;
-  op.sel_idx = sel_idx;
-  op.item_idx = item_idx;
-  op.param_idx = param_idx;
+  op.id = param_id;
 
-  // Apply the operation
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -3053,45 +2876,25 @@ cleanup:
   return success;
 }
 
-char const *ptk_anm2_param_get_value(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx, size_t param_idx) {
-  if (!doc || !doc->selectors) {
+char const *ptk_anm2_param_get_value(struct ptk_anm2 const *doc, uint32_t param_id) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  size_t param_idx = 0;
+  if (!ptk_anm2_find_param(doc, param_id, &sel_idx, &item_idx, &param_idx)) {
     return NULL;
   }
-  if (sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    return NULL;
-  }
-  struct selector const *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    return NULL;
-  }
-  struct item const *it = &sel->items[item_idx];
-  if (!it->params || param_idx >= OV_ARRAY_LENGTH(it->params)) {
-    return NULL;
-  }
-  return it->params[param_idx].value;
+  return doc->selectors[sel_idx].items[item_idx].params[param_idx].value;
 }
 
-bool ptk_anm2_param_set_value(struct ptk_anm2 *doc,
-                              size_t sel_idx,
-                              size_t item_idx,
-                              size_t param_idx,
-                              char const *value,
-                              struct ov_error *const err) {
+bool ptk_anm2_param_set_value(struct ptk_anm2 *doc, uint32_t param_id, char const *value, struct ov_error *const err) {
   if (!doc) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
-  if (!doc->selectors || sel_idx >= OV_ARRAY_LENGTH(doc->selectors)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  struct selector *sel = &doc->selectors[sel_idx];
-  if (!sel->items || item_idx >= OV_ARRAY_LENGTH(sel->items)) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  struct item *it = &sel->items[item_idx];
-  if (!it->params || param_idx >= OV_ARRAY_LENGTH(it->params)) {
+  size_t sel_idx = 0;
+  size_t item_idx = 0;
+  size_t param_idx = 0;
+  if (!ptk_anm2_find_param(doc, param_id, &sel_idx, &item_idx, &param_idx)) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
     return false;
   }
@@ -3100,31 +2903,26 @@ bool ptk_anm2_param_set_value(struct ptk_anm2 *doc,
   struct ptk_anm2_op op = {0};
   struct ptk_anm2_op reverse_op = {0};
 
-  // Build SET_VALUE operation
   if (!strdup_to_array(&op.str_data, value, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
   op.type = ptk_anm2_op_param_set_value;
-  op.sel_idx = sel_idx;
-  op.item_idx = item_idx;
-  op.param_idx = param_idx;
+  op.id = param_id;
 
-  // Apply the operation
   if (!apply_op(doc, &op, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
 
-  // Push reverse operation to undo stack
   if (!push_undo_op(doc, &reverse_op, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
+  memset(&reverse_op, 0, sizeof(reverse_op));
 
-  // Clear redo stack
   clear_redo_stack(doc);
+  notify_state(doc);
 
   success = true;
 
@@ -3133,10 +2931,6 @@ cleanup:
   op_free(&reverse_op);
   return success;
 }
-
-// ============================================================================
-// UNDO/REDO operations (stub implementations)
-// ============================================================================
 
 bool ptk_anm2_can_undo(struct ptk_anm2 const *doc) {
   if (!doc || !doc->undo_stack) {
@@ -3162,16 +2956,16 @@ bool ptk_anm2_undo(struct ptk_anm2 *doc, struct ov_error *const err) {
   }
 
   bool success = false;
-  struct ptk_anm2_op op = {.type = ptk_anm2_op_group_begin};
-  struct ptk_anm2_op reverse_op = {.type = ptk_anm2_op_group_begin};
+  struct ptk_anm2_op op = {.type = ptk_anm2_op_transaction_begin};
+  struct ptk_anm2_op reverse_op = {.type = ptk_anm2_op_transaction_begin};
 
   // Pop from undo stack
   size_t len = OV_ARRAY_LENGTH(doc->undo_stack);
   op = doc->undo_stack[len - 1];
   OV_ARRAY_SET_LENGTH(doc->undo_stack, len - 1);
 
-  // Check if this is a GROUP_END - if so, we need to undo until GROUP_BEGIN
-  bool const is_group = (op.type == ptk_anm2_op_group_end);
+  // Check if this is a TRANSACTION_END - if so, we need to undo until TRANSACTION_BEGIN
+  bool const is_transaction = (op.type == ptk_anm2_op_transaction_end);
 
   for (;;) {
     enum ptk_anm2_op_type const op_type = op.type;
@@ -3183,9 +2977,14 @@ bool ptk_anm2_undo(struct ptk_anm2 *doc, struct ov_error *const err) {
     }
 
     // Push reverse operation to redo stack (transfers ownership)
-    if (!push_redo_op(doc, &reverse_op, err)) {
-      OV_ERROR_ADD_TRACE(err);
-      goto cleanup;
+    {
+      size_t const rlen = OV_ARRAY_LENGTH(doc->redo_stack);
+      if (!OV_ARRAY_GROW(&doc->redo_stack, rlen + 1)) {
+        OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
+        goto cleanup;
+      }
+      doc->redo_stack[rlen] = reverse_op;
+      OV_ARRAY_SET_LENGTH(doc->redo_stack, rlen + 1);
     }
     memset(&reverse_op, 0, sizeof(reverse_op)); // ownership transferred
 
@@ -3193,13 +2992,13 @@ bool ptk_anm2_undo(struct ptk_anm2 *doc, struct ov_error *const err) {
     op_free(&op);
     memset(&op, 0, sizeof(op));
 
-    // If we just processed GROUP_BEGIN and we're in a group, we're done
-    if (is_group && op_type == ptk_anm2_op_group_begin) {
+    // If we just processed TRANSACTION_BEGIN and we're in a transaction, we're done
+    if (is_transaction && op_type == ptk_anm2_op_transaction_begin) {
       break;
     }
 
-    // If we're not in a group, we're done after one operation
-    if (!is_group) {
+    // If we're not in a transaction, we're done after one operation
+    if (!is_transaction) {
       break;
     }
 
@@ -3212,6 +3011,7 @@ bool ptk_anm2_undo(struct ptk_anm2 *doc, struct ov_error *const err) {
     op = doc->undo_stack[len - 1];
     OV_ARRAY_SET_LENGTH(doc->undo_stack, len - 1);
   }
+  notify_state(doc);
 
   success = true;
 
@@ -3233,18 +3033,18 @@ bool ptk_anm2_redo(struct ptk_anm2 *doc, struct ov_error *const err) {
   }
 
   bool success = false;
-  struct ptk_anm2_op op = {.type = ptk_anm2_op_group_begin};
-  struct ptk_anm2_op reverse_op = {.type = ptk_anm2_op_group_begin};
+  struct ptk_anm2_op op = {.type = ptk_anm2_op_transaction_begin};
+  struct ptk_anm2_op reverse_op = {.type = ptk_anm2_op_transaction_begin};
 
   // Pop from redo stack
   size_t len = OV_ARRAY_LENGTH(doc->redo_stack);
   op = doc->redo_stack[len - 1];
   OV_ARRAY_SET_LENGTH(doc->redo_stack, len - 1);
 
-  // Check if this is a GROUP_END - if so, we need to redo until GROUP_BEGIN
+  // Check if this is a TRANSACTION_END - if so, we need to redo until TRANSACTION_BEGIN
   // (After undo, redo stack has operations in reverse order:
-  //  GROUP_END is at top, GROUP_BEGIN is at bottom)
-  bool const is_group = (op.type == ptk_anm2_op_group_end);
+  //  TRANSACTION_END is at top, TRANSACTION_BEGIN is at bottom)
+  bool const is_transaction = (op.type == ptk_anm2_op_transaction_end);
 
   for (;;) {
     enum ptk_anm2_op_type const op_type = op.type;
@@ -3266,13 +3066,13 @@ bool ptk_anm2_redo(struct ptk_anm2 *doc, struct ov_error *const err) {
     op_free(&op);
     memset(&op, 0, sizeof(op));
 
-    // If we just processed GROUP_BEGIN and we're in a group, we're done
-    if (is_group && op_type == ptk_anm2_op_group_begin) {
+    // If we just processed TRANSACTION_BEGIN and we're in a transaction, we're done
+    if (is_transaction && op_type == ptk_anm2_op_transaction_begin) {
       break;
     }
 
-    // If we're not in a group, we're done after one operation
-    if (!is_group) {
+    // If we're not in a transaction, we're done after one operation
+    if (!is_transaction) {
       break;
     }
 
@@ -3285,6 +3085,7 @@ bool ptk_anm2_redo(struct ptk_anm2 *doc, struct ov_error *const err) {
     op = doc->redo_stack[len - 1];
     OV_ARRAY_SET_LENGTH(doc->redo_stack, len - 1);
   }
+  notify_state(doc);
 
   success = true;
 
@@ -3310,14 +3111,15 @@ bool ptk_anm2_begin_transaction(struct ptk_anm2 *doc, struct ov_error *const err
     return false;
   }
   if (doc->transaction_depth == 0) {
-    // Push GROUP_BEGIN marker when entering outermost transaction
+    // Push TRANSACTION_BEGIN marker when entering outermost transaction
     clear_redo_stack(doc);
-    struct ptk_anm2_op op = {.type = ptk_anm2_op_group_begin};
+    struct ptk_anm2_op op = {.type = ptk_anm2_op_transaction_begin};
     if (!push_undo_op(doc, &op, err)) {
       OV_ERROR_ADD_TRACE(err);
       return false;
     }
-    notify_change(doc, ptk_anm2_op_group_begin, 0, 0, 0, 0, 0);
+    notify_change(doc, ptk_anm2_op_transaction_begin, 0, 0, 0);
+    notify_state(doc);
   }
   doc->transaction_depth++;
   return true;
@@ -3334,20 +3136,28 @@ bool ptk_anm2_end_transaction(struct ptk_anm2 *doc, struct ov_error *const err) 
   }
   doc->transaction_depth--;
   if (doc->transaction_depth == 0) {
-    // Push GROUP_END marker when exiting outermost transaction
-    struct ptk_anm2_op op = {.type = ptk_anm2_op_group_end};
+    // Check if the transaction was empty (only TRANSACTION_BEGIN on stack)
+    size_t const undo_len = OV_ARRAY_LENGTH(doc->undo_stack);
+    if (undo_len > 0 && doc->undo_stack[undo_len - 1].type == ptk_anm2_op_transaction_begin) {
+      // Empty transaction - remove TRANSACTION_BEGIN and don't push TRANSACTION_END
+      op_free(&doc->undo_stack[undo_len - 1]);
+      OV_ARRAY_SET_LENGTH(doc->undo_stack, undo_len - 1);
+      // Notify state change to update toolbar (undo was enabled during begin_transaction)
+      notify_state(doc);
+      return true;
+    }
+
+    // Push TRANSACTION_END marker when exiting outermost transaction
+    struct ptk_anm2_op op = {.type = ptk_anm2_op_transaction_end};
     if (!push_undo_op(doc, &op, err)) {
       OV_ERROR_ADD_TRACE(err);
       return false;
     }
-    notify_change(doc, ptk_anm2_op_group_end, 0, 0, 0, 0, 0);
+    notify_change(doc, ptk_anm2_op_transaction_end, 0, 0, 0);
+    notify_state(doc);
   }
   return true;
 }
-
-// ============================================================================
-// File operations
-// ============================================================================
 
 // Parse animation item: {script: "name", n: "display name", params: [[key, value], ...]}
 static bool parse_item_animation(yyjson_val *item_val, struct item *it, struct ov_error *const err) {
@@ -3443,7 +3253,7 @@ static bool parse_selector_json(yyjson_val *sel_val, struct selector *sel, struc
 
   {
     char const *group_str = yyjson_get_str(group_val);
-    if (!strdup_to_array(&sel->group, group_str, err)) {
+    if (!strdup_to_array(&sel->name, group_str, err)) {
       OV_ERROR_ADD_TRACE(err);
       goto cleanup;
     }
@@ -3662,10 +3472,16 @@ bool ptk_anm2_load(struct ptk_anm2 *doc, wchar_t const *path, struct ov_error *c
   bool success = false;
   char *content = NULL;
   struct ovl_file *file = NULL;
-  struct ptk_anm2 temp = {0};
+  // Initialize temp with doc's callbacks so they survive through reset and swap
+  struct ptk_anm2 temp = {
+      .change_callback = doc->change_callback,
+      .change_callback_userdata = doc->change_callback_userdata,
+      .state_callback = doc->state_callback,
+      .state_callback_userdata = doc->state_callback_userdata,
+  };
 
-  // Initialize temporary document
-  if (!doc_init(&temp, err)) {
+  // Initialize temporary document (ptk_anm2_reset preserves callbacks)
+  if (!ptk_anm2_reset(&temp, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
@@ -3753,31 +3569,20 @@ bool ptk_anm2_load(struct ptk_anm2 *doc, wchar_t const *path, struct ov_error *c
     }
   }
 
-  // Success - swap contents
-  {
-    // Save callback info from original doc
-    ptk_anm2_change_callback cb = doc->change_callback;
-    void *cb_userdata = doc->change_callback_userdata;
-
-    // Clean up original doc contents
-    doc_cleanup(doc);
-
-    // Copy temp contents to doc (struct copy)
-    *doc = temp;
-
-    // Restore callback
-    doc->change_callback = cb;
-    doc->change_callback_userdata = cb_userdata;
-
-    // Clear temp so cleanup doesn't free the now-doc-owned resources
-    temp = (struct ptk_anm2){0};
-  }
+  // Swap contents
+  doc_cleanup(doc);
+  *doc = temp;
+  temp = (struct ptk_anm2){0};
 
   // Clear undo/redo stacks after load
   ptk_anm2_clear_undo_history(doc);
 
+  // Clear modified flag after successful load
+  doc->modified = false;
+
   // Notify that document was reset (loaded)
-  notify_change(doc, ptk_anm2_op_reset, 0, 0, 0, 0, 0);
+  notify_change(doc, ptk_anm2_op_reset, 0, 0, 0);
+  notify_state(doc);
 
   success = true;
 
@@ -3840,6 +3645,10 @@ bool ptk_anm2_save(struct ptk_anm2 *doc, wchar_t const *path, struct ov_error *c
     }
   }
 
+  // Clear modified flag on successful save
+  doc->modified = false;
+  notify_state(doc);
+
   success = true;
 
 cleanup:
@@ -3859,9 +3668,12 @@ bool ptk_anm2_verify_checksum(struct ptk_anm2 const *doc) {
   return doc->stored_checksum == doc->calculated_checksum;
 }
 
-// ============================================================================
-// ID and userdata operations
-// ============================================================================
+bool ptk_anm2_is_modified(struct ptk_anm2 const *doc) {
+  if (!doc) {
+    return false;
+  }
+  return doc->modified;
+}
 
 uint32_t ptk_anm2_selector_get_id(struct ptk_anm2 const *doc, size_t idx) {
   if (!doc || !doc->selectors) {
@@ -3873,7 +3685,7 @@ uint32_t ptk_anm2_selector_get_id(struct ptk_anm2 const *doc, size_t idx) {
   return doc->selectors[idx].id;
 }
 
-uintptr_t ptk_anm2_selector_get_userdata(struct ptk_anm2 const *doc, size_t idx) {
+static uintptr_t selector_get_userdata(struct ptk_anm2 const *doc, size_t idx) {
   if (!doc || !doc->selectors) {
     return 0;
   }
@@ -3883,7 +3695,7 @@ uintptr_t ptk_anm2_selector_get_userdata(struct ptk_anm2 const *doc, size_t idx)
   return doc->selectors[idx].userdata;
 }
 
-void ptk_anm2_selector_set_userdata(struct ptk_anm2 *doc, size_t idx, uintptr_t userdata) {
+static void selector_set_userdata(struct ptk_anm2 *doc, size_t idx, uintptr_t userdata) {
   if (!doc || !doc->selectors) {
     return;
   }
@@ -3907,7 +3719,7 @@ uint32_t ptk_anm2_item_get_id(struct ptk_anm2 const *doc, size_t sel_idx, size_t
   return sel->items[item_idx].id;
 }
 
-uintptr_t ptk_anm2_item_get_userdata(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx) {
+static uintptr_t item_get_userdata(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx) {
   if (!doc || !doc->selectors) {
     return 0;
   }
@@ -3921,7 +3733,7 @@ uintptr_t ptk_anm2_item_get_userdata(struct ptk_anm2 const *doc, size_t sel_idx,
   return sel->items[item_idx].userdata;
 }
 
-void ptk_anm2_item_set_userdata(struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, uintptr_t userdata) {
+static void item_set_userdata(struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, uintptr_t userdata) {
   if (!doc || !doc->selectors) {
     return;
   }
@@ -3953,7 +3765,7 @@ uint32_t ptk_anm2_param_get_id(struct ptk_anm2 const *doc, size_t sel_idx, size_
   return it->params[param_idx].id;
 }
 
-uintptr_t ptk_anm2_param_get_userdata(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx, size_t param_idx) {
+static uintptr_t param_get_userdata(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx, size_t param_idx) {
   if (!doc || !doc->selectors) {
     return 0;
   }
@@ -3971,8 +3783,8 @@ uintptr_t ptk_anm2_param_get_userdata(struct ptk_anm2 const *doc, size_t sel_idx
   return it->params[param_idx].userdata;
 }
 
-void ptk_anm2_param_set_userdata(
-    struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, size_t param_idx, uintptr_t userdata) {
+static void
+param_set_userdata(struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, size_t param_idx, uintptr_t userdata) {
   if (!doc || !doc->selectors) {
     return;
   }
@@ -3990,11 +3802,55 @@ void ptk_anm2_param_set_userdata(
   it->params[param_idx].userdata = userdata;
 }
 
-// ============================================================================
-// ID reverse lookup operations
-// ============================================================================
+uintptr_t ptk_anm2_selector_get_userdata(struct ptk_anm2 const *doc, uint32_t id) {
+  size_t sel_idx;
+  if (!ptk_anm2_find_selector(doc, id, &sel_idx)) {
+    return 0;
+  }
+  return selector_get_userdata(doc, sel_idx);
+}
 
-bool ptk_anm2_find_selector_by_id(struct ptk_anm2 const *doc, uint32_t id, size_t *out_sel_idx) {
+void ptk_anm2_selector_set_userdata(struct ptk_anm2 *doc, uint32_t id, uintptr_t userdata) {
+  size_t sel_idx;
+  if (!ptk_anm2_find_selector(doc, id, &sel_idx)) {
+    return;
+  }
+  selector_set_userdata(doc, sel_idx, userdata);
+}
+
+uintptr_t ptk_anm2_item_get_userdata(struct ptk_anm2 const *doc, uint32_t id) {
+  size_t sel_idx, item_idx;
+  if (!ptk_anm2_find_item(doc, id, &sel_idx, &item_idx)) {
+    return 0;
+  }
+  return item_get_userdata(doc, sel_idx, item_idx);
+}
+
+void ptk_anm2_item_set_userdata(struct ptk_anm2 *doc, uint32_t id, uintptr_t userdata) {
+  size_t sel_idx, item_idx;
+  if (!ptk_anm2_find_item(doc, id, &sel_idx, &item_idx)) {
+    return;
+  }
+  item_set_userdata(doc, sel_idx, item_idx, userdata);
+}
+
+uintptr_t ptk_anm2_param_get_userdata(struct ptk_anm2 const *doc, uint32_t id) {
+  size_t sel_idx, item_idx, param_idx;
+  if (!ptk_anm2_find_param(doc, id, &sel_idx, &item_idx, &param_idx)) {
+    return 0;
+  }
+  return param_get_userdata(doc, sel_idx, item_idx, param_idx);
+}
+
+void ptk_anm2_param_set_userdata(struct ptk_anm2 *doc, uint32_t id, uintptr_t userdata) {
+  size_t sel_idx, item_idx, param_idx;
+  if (!ptk_anm2_find_param(doc, id, &sel_idx, &item_idx, &param_idx)) {
+    return;
+  }
+  param_set_userdata(doc, sel_idx, item_idx, param_idx, userdata);
+}
+
+bool ptk_anm2_find_selector(struct ptk_anm2 const *doc, uint32_t id, size_t *out_sel_idx) {
   if (!doc || !doc->selectors || id == 0) {
     return false;
   }
@@ -4010,7 +3866,7 @@ bool ptk_anm2_find_selector_by_id(struct ptk_anm2 const *doc, uint32_t id, size_
   return false;
 }
 
-bool ptk_anm2_find_item_by_id(struct ptk_anm2 const *doc, uint32_t id, size_t *out_sel_idx, size_t *out_item_idx) {
+bool ptk_anm2_find_item(struct ptk_anm2 const *doc, uint32_t id, size_t *out_sel_idx, size_t *out_item_idx) {
   if (!doc || !doc->selectors || id == 0) {
     return false;
   }
@@ -4036,7 +3892,7 @@ bool ptk_anm2_find_item_by_id(struct ptk_anm2 const *doc, uint32_t id, size_t *o
   return false;
 }
 
-bool ptk_anm2_find_param_by_id(
+bool ptk_anm2_find_param(
     struct ptk_anm2 const *doc, uint32_t id, size_t *out_sel_idx, size_t *out_item_idx, size_t *out_param_idx) {
   if (!doc || !doc->selectors || id == 0) {
     return false;

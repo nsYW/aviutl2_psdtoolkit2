@@ -29,9 +29,9 @@ enum ptk_anm2_op_type {
   // Special operation: document reset (load/new)
   ptk_anm2_op_reset = 0,
 
-  // Group markers (for transaction boundaries)
-  ptk_anm2_op_group_begin,
-  ptk_anm2_op_group_end,
+  // Transaction markers
+  ptk_anm2_op_transaction_begin,
+  ptk_anm2_op_transaction_end,
 
   // Metadata operations
   ptk_anm2_op_set_label,
@@ -42,7 +42,7 @@ enum ptk_anm2_op_type {
   // Selector operations
   ptk_anm2_op_selector_insert,
   ptk_anm2_op_selector_remove,
-  ptk_anm2_op_selector_set_group,
+  ptk_anm2_op_selector_set_name,
   ptk_anm2_op_selector_move,
 
   // Item operations
@@ -67,19 +67,12 @@ enum ptk_anm2_op_type {
  *
  * @param userdata User-provided context
  * @param op_type Type of operation that was performed
- * @param sel_idx Selector index (for selector/item/param operations)
- * @param item_idx Item index (for item/param operations)
- * @param param_idx Parameter index (for param operations)
- * @param to_sel_idx Destination selector index (for move operations)
- * @param to_idx Destination index (for move operations)
+ * @param id ID of the affected element (selector/item/param), 0 for metadata ops
+ * @param parent_id Parent ID (selector for item ops, item for param ops), 0 otherwise
+ * @param before_id For insert/move ops: ID of element before which insertion occurred (0=end)
  */
-typedef void (*ptk_anm2_change_callback)(void *userdata,
-                                         enum ptk_anm2_op_type op_type,
-                                         size_t sel_idx,
-                                         size_t item_idx,
-                                         size_t param_idx,
-                                         size_t to_sel_idx,
-                                         size_t to_idx);
+typedef void (*ptk_anm2_change_callback)(
+    void *userdata, enum ptk_anm2_op_type op_type, uint32_t id, uint32_t parent_id, uint32_t before_id);
 
 /**
  * @brief Set the change callback for document modifications
@@ -93,9 +86,28 @@ typedef void (*ptk_anm2_change_callback)(void *userdata,
  */
 void ptk_anm2_set_change_callback(struct ptk_anm2 *doc, ptk_anm2_change_callback callback, void *userdata);
 
-// ============================================================================
-// Document lifecycle
-// ============================================================================
+/**
+ * @brief Callback for state change notifications
+ *
+ * Called when undo/redo state, modified state, or save-ability changes.
+ * This is separate from change_callback because state changes occur
+ * AFTER the undo stack is updated, not during the operation.
+ *
+ * @param userdata User-provided context
+ */
+typedef void (*ptk_anm2_state_callback)(void *userdata);
+
+/**
+ * @brief Set the state callback for undo/redo/modified state changes
+ *
+ * The callback will be invoked after undo stack updates, saves, etc.
+ * Set to NULL to disable notifications.
+ *
+ * @param doc Document handle
+ * @param callback Callback function (or NULL to disable)
+ * @param userdata User-provided context passed to callback
+ */
+void ptk_anm2_set_state_callback(struct ptk_anm2 *doc, ptk_anm2_state_callback callback, void *userdata);
 
 /**
  * @brief Create a new empty anm2 document
@@ -112,9 +124,17 @@ NODISCARD struct ptk_anm2 *ptk_anm2_new(struct ov_error *const err);
  */
 void ptk_anm2_destroy(struct ptk_anm2 **doc);
 
-// ============================================================================
-// File operations
-// ============================================================================
+/**
+ * @brief Reset an anm2 document to empty state
+ *
+ * Clears all selectors, items, metadata, and UNDO/REDO history.
+ * The document becomes equivalent to a newly created one.
+ *
+ * @param doc Document handle
+ * @param err Error information
+ * @return true on success, false on failure
+ */
+NODISCARD bool ptk_anm2_reset(struct ptk_anm2 *doc, struct ov_error *const err);
 
 /**
  * @brief Load an anm2 document from file
@@ -164,9 +184,16 @@ NODISCARD bool ptk_anm2_save(struct ptk_anm2 *doc, wchar_t const *path, struct o
  */
 NODISCARD bool ptk_anm2_verify_checksum(struct ptk_anm2 const *doc);
 
-// ============================================================================
-// Metadata operations
-// ============================================================================
+/**
+ * @brief Check if document has been modified since last save/load/reset
+ *
+ * Returns true if any changes have been made to the document that haven't
+ * been saved. This is reset to false by load, save, and reset operations.
+ *
+ * @param doc Document handle
+ * @return true if document has unsaved changes
+ */
+bool ptk_anm2_is_modified(struct ptk_anm2 const *doc);
 
 /**
  * @brief Get the document label
@@ -260,10 +287,6 @@ NODISCARD bool ptk_anm2_set_information(struct ptk_anm2 *doc, char const *inform
  */
 int ptk_anm2_get_version(struct ptk_anm2 const *doc);
 
-// ============================================================================
-// Selector operations
-// ============================================================================
-
 /**
  * @brief Get the number of selectors
  *
@@ -273,404 +296,330 @@ int ptk_anm2_get_version(struct ptk_anm2 const *doc);
 size_t ptk_anm2_selector_count(struct ptk_anm2 const *doc);
 
 /**
- * @brief Add a new selector at the end
+ * @brief Insert a new selector before the specified selector
  *
  * Records UNDO operation.
+ * If before_id is 0 or invalid, the selector is added at the end.
+ * If before_id is a valid selector ID, the new selector is inserted before it.
  *
  * @param doc Document handle
- * @param group Group name for the new selector
+ * @param before_id ID of the selector before which to insert, or 0 for end
+ * @param name Name for the new selector
  * @param err Error information
  * @return ID of the new selector on success, 0 on failure
  */
-NODISCARD uint32_t ptk_anm2_selector_add(struct ptk_anm2 *doc, char const *group, struct ov_error *const err);
+NODISCARD uint32_t ptk_anm2_selector_insert(struct ptk_anm2 *doc,
+                                            uint32_t before_id,
+                                            char const *name,
+                                            struct ov_error *const err);
 
 /**
- * @brief Remove a selector at the specified index
+ * @brief Remove a selector by ID
  *
  * Records UNDO operation (including all contained items).
  *
  * @param doc Document handle
- * @param idx Index of the selector to remove
+ * @param id Selector ID
  * @param err Error information
  * @return true on success, false on failure
  */
-NODISCARD bool ptk_anm2_selector_remove(struct ptk_anm2 *doc, size_t idx, struct ov_error *const err);
+NODISCARD bool ptk_anm2_selector_remove(struct ptk_anm2 *doc, uint32_t id, struct ov_error *const err);
 
 /**
- * @brief Get the group name of a selector
+ * @brief Get the name of a selector by ID
  *
  * @param doc Document handle
- * @param idx Selector index
- * @return Group name string (owned by doc, do not free), NULL if index is invalid
+ * @param id Selector ID
+ * @return Name string (owned by doc, do not free), NULL if ID is invalid
  */
-char const *ptk_anm2_selector_get_group(struct ptk_anm2 const *doc, size_t idx);
+char const *ptk_anm2_selector_get_name(struct ptk_anm2 const *doc, uint32_t id);
 
 /**
- * @brief Set the group name of a selector
+ * @brief Set the name of a selector by ID
  *
  * Records UNDO operation.
  *
  * @param doc Document handle
- * @param idx Selector index
- * @param group New group name
- * @param err Error information
- * @return true on success, false on failure
- */
-NODISCARD bool
-ptk_anm2_selector_set_group(struct ptk_anm2 *doc, size_t idx, char const *group, struct ov_error *const err);
-
-/**
- * @brief Move a selector to a new position
- *
- * Records UNDO operation.
- *
- * @param doc Document handle
- * @param from_idx Current index of the selector
- * @param to_idx Target index (element at to_idx will shift)
+ * @param id Selector ID
+ * @param name New name
  * @param err Error information
  * @return true on success, false on failure
  */
 NODISCARD bool
-ptk_anm2_selector_move_to(struct ptk_anm2 *doc, size_t from_idx, size_t to_idx, struct ov_error *const err);
-
-// ============================================================================
-// Item operations
-// ============================================================================
+ptk_anm2_selector_set_name(struct ptk_anm2 *doc, uint32_t id, char const *name, struct ov_error *const err);
 
 /**
- * @brief Get the number of items in a selector
- *
- * @param doc Document handle
- * @param sel_idx Selector index
- * @return Number of items, 0 if selector index is invalid
- */
-size_t ptk_anm2_item_count(struct ptk_anm2 const *doc, size_t sel_idx);
-
-/**
- * @brief Check if an item is an animation item
- *
- * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @return true if animation item, false if value item or indices are invalid
- */
-bool ptk_anm2_item_is_animation(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx);
-
-/**
- * @brief Add a value item at the end of a selector
+ * @brief Move a selector before another selector by ID
  *
  * Records UNDO operation.
+ * If before_id is 0 or invalid, the selector is moved to the end.
+ * If before_id is a valid selector ID, the selector is moved before it.
  *
  * @param doc Document handle
- * @param sel_idx Selector index
+ * @param id Selector ID to move
+ * @param before_id ID of the selector before which to move, or 0 for end
+ * @param err Error information
+ * @return true on success, false on failure
+ */
+NODISCARD bool
+ptk_anm2_selector_move(struct ptk_anm2 *doc, uint32_t id, uint32_t before_id, struct ov_error *const err);
+
+/**
+ * @brief Check if moving a selector would result in an actual position change
+ *
+ * @param doc Document handle (const)
+ * @param id Selector ID to move
+ * @param before_id ID of the selector before which to move, or 0 for end
+ * @return true if the move would change position, false if it would be a no-op
+ */
+bool ptk_anm2_selector_would_move(struct ptk_anm2 const *doc, uint32_t id, uint32_t before_id);
+
+/**
+ * @brief Get the number of items in a selector by selector ID
+ *
+ * @param doc Document handle
+ * @param selector_id Selector ID
+ * @return Number of items, 0 if selector ID is invalid
+ */
+size_t ptk_anm2_item_count(struct ptk_anm2 const *doc, uint32_t selector_id);
+
+/**
+ * @brief Check if an item is an animation item by ID
+ *
+ * @param doc Document handle
+ * @param id Item ID
+ * @return true if animation item, false if value item or ID is invalid
+ */
+bool ptk_anm2_item_is_animation(struct ptk_anm2 const *doc, uint32_t id);
+
+/**
+ * @brief Insert a value item before the specified item
+ *
+ * Records UNDO operation.
+ * - If before_id is a selector ID, the item is added at the end of that selector.
+ * - If before_id is an item ID, the new item is inserted before it.
+ * - If before_id is 0 or invalid, returns error.
+ *
+ * @param doc Document handle
+ * @param before_id ID of the item before which to insert, or selector ID for end
  * @param name Display name
  * @param value Layer path value
  * @param err Error information
  * @return ID of the new item on success, 0 on failure
  */
-NODISCARD uint32_t ptk_anm2_item_add_value(
-    struct ptk_anm2 *doc, size_t sel_idx, char const *name, char const *value, struct ov_error *const err);
+NODISCARD uint32_t ptk_anm2_item_insert_value(
+    struct ptk_anm2 *doc, uint32_t before_id, char const *name, char const *value, struct ov_error *const err);
 
 /**
- * @brief Insert a value item at the specified position
+ * @brief Insert an animation item before the specified item
  *
  * Records UNDO operation.
+ * - If before_id is a selector ID, the item is added at the end of that selector.
+ * - If before_id is an item ID, the new item is inserted before it.
+ * - If before_id is 0 or invalid, returns error.
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Position to insert
- * @param name Display name
- * @param value Layer path value
- * @param err Error information
- * @return ID of the new item on success, 0 on failure
- */
-NODISCARD uint32_t ptk_anm2_item_insert_value(struct ptk_anm2 *doc,
-                                              size_t sel_idx,
-                                              size_t item_idx,
-                                              char const *name,
-                                              char const *value,
-                                              struct ov_error *const err);
-
-/**
- * @brief Add an animation item at the end of a selector
- *
- * Records UNDO operation.
- *
- * @param doc Document handle
- * @param sel_idx Selector index
+ * @param before_id ID of the item before which to insert, or selector ID for end
  * @param script_name Script name (e.g., "PSDToolKit.Blinker")
  * @param name Display name
  * @param err Error information
  * @return ID of the new item on success, 0 on failure
  */
-NODISCARD uint32_t ptk_anm2_item_add_animation(
-    struct ptk_anm2 *doc, size_t sel_idx, char const *script_name, char const *name, struct ov_error *const err);
+NODISCARD uint32_t ptk_anm2_item_insert_animation(
+    struct ptk_anm2 *doc, uint32_t before_id, char const *script_name, char const *name, struct ov_error *const err);
 
 /**
- * @brief Insert an animation item at the specified position
- *
- * Records UNDO operation.
- *
- * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Position to insert
- * @param script_name Script name (e.g., "PSDToolKit.Blinker")
- * @param name Display name
- * @param err Error information
- * @return ID of the new item on success, 0 on failure
- */
-NODISCARD uint32_t ptk_anm2_item_insert_animation(struct ptk_anm2 *doc,
-                                                  size_t sel_idx,
-                                                  size_t item_idx,
-                                                  char const *script_name,
-                                                  char const *name,
-                                                  struct ov_error *const err);
-
-/**
- * @brief Remove an item from a selector
+ * @brief Remove an item by ID
  *
  * Records UNDO operation (including all parameters for animation items).
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
+ * @param id Item ID
  * @param err Error information
  * @return true on success, false on failure
  */
-NODISCARD bool ptk_anm2_item_remove(struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, struct ov_error *const err);
+NODISCARD bool ptk_anm2_item_remove(struct ptk_anm2 *doc, uint32_t id, struct ov_error *const err);
 
 /**
- * @brief Move an item to a new position
+ * @brief Move an item before another item by ID
  *
- * Moves an item from one selector to another, or within the same selector.
  * Records UNDO operation.
+ * - If before_id is a selector ID, the item is moved to the end of that selector.
+ * - If before_id is an item ID, the item is moved before it.
  *
  * @param doc Document handle
- * @param from_sel_idx Source selector index
- * @param from_idx Current item index within source selector
- * @param to_sel_idx Destination selector index (can be same as from_sel_idx)
- * @param to_idx Target index within destination selector
+ * @param id Item ID to move
+ * @param before_id ID of the item before which to move, or selector ID for end
  * @param err Error information
  * @return true on success, false on failure
  */
-NODISCARD bool ptk_anm2_item_move_to(struct ptk_anm2 *doc,
-                                     size_t from_sel_idx,
-                                     size_t from_idx,
-                                     size_t to_sel_idx,
-                                     size_t to_idx,
-                                     struct ov_error *const err);
+NODISCARD bool ptk_anm2_item_move(struct ptk_anm2 *doc, uint32_t id, uint32_t before_id, struct ov_error *const err);
 
 /**
- * @brief Get the display name of an item
+ * @brief Check if moving an item would result in an actual position change
+ *
+ * @param doc Document handle (const)
+ * @param id Item ID to move
+ * @param before_id Insert before this ID (item or selector ID for end insertion)
+ * @return true if the move would change position, false if it would be a no-op
+ */
+bool ptk_anm2_item_would_move(struct ptk_anm2 const *doc, uint32_t id, uint32_t before_id);
+
+/**
+ * @brief Get the display name of an item by ID
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @return Name string (owned by doc), NULL if indices are invalid
+ * @param id Item ID
+ * @return Name string (owned by doc), NULL if ID is invalid
  */
-char const *ptk_anm2_item_get_name(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx);
+char const *ptk_anm2_item_get_name(struct ptk_anm2 const *doc, uint32_t id);
 
 /**
- * @brief Set the display name of an item
+ * @brief Set the display name of an item by ID
  *
  * Records UNDO operation.
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
+ * @param id Item ID
  * @param name New display name
  * @param err Error information
  * @return true on success, false on failure
  */
-NODISCARD bool ptk_anm2_item_set_name(
-    struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, char const *name, struct ov_error *const err);
+NODISCARD bool ptk_anm2_item_set_name(struct ptk_anm2 *doc, uint32_t id, char const *name, struct ov_error *const err);
 
 /**
- * @brief Get the value (layer path) of a value item
+ * @brief Get the value (layer path) of a value item by ID
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @return Value string (owned by doc), NULL if indices are invalid or item is animation
+ * @param id Item ID
+ * @return Value string (owned by doc), NULL if ID is invalid or item is animation
  */
-char const *ptk_anm2_item_get_value(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx);
+char const *ptk_anm2_item_get_value(struct ptk_anm2 const *doc, uint32_t id);
 
 /**
- * @brief Set the value (layer path) of a value item
+ * @brief Set the value (layer path) of a value item by ID
  *
  * Records UNDO operation.
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
+ * @param id Item ID
  * @param value New layer path value
  * @param err Error information
  * @return true on success, false on failure
  */
-NODISCARD bool ptk_anm2_item_set_value(
-    struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, char const *value, struct ov_error *const err);
+NODISCARD bool
+ptk_anm2_item_set_value(struct ptk_anm2 *doc, uint32_t id, char const *value, struct ov_error *const err);
 
 /**
- * @brief Get the script name of an animation item
+ * @brief Get the script name of an animation item by ID
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @return Script name (owned by doc), NULL if indices are invalid or item is value
+ * @param id Item ID
+ * @return Script name (owned by doc), NULL if ID is invalid or item is value
  */
-char const *ptk_anm2_item_get_script_name(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx);
+char const *ptk_anm2_item_get_script_name(struct ptk_anm2 const *doc, uint32_t id);
 
 /**
- * @brief Set the script name of an animation item
+ * @brief Set the script name of an animation item by ID
  *
  * Records UNDO operation.
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
+ * @param id Item ID
  * @param script_name New script name
  * @param err Error information
  * @return true on success, false on failure
  */
-NODISCARD bool ptk_anm2_item_set_script_name(
-    struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, char const *script_name, struct ov_error *const err);
-
-// ============================================================================
-// Parameter operations (for animation items)
-// ============================================================================
+NODISCARD bool
+ptk_anm2_item_set_script_name(struct ptk_anm2 *doc, uint32_t id, char const *script_name, struct ov_error *const err);
 
 /**
- * @brief Get the number of parameters for an animation item
+ * @brief Get the number of parameters for an animation item by ID
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @return Number of parameters, 0 if indices are invalid or item is not animation
+ * @param id Item ID
+ * @return Number of parameters, 0 if ID is invalid or item is not animation
  */
-size_t ptk_anm2_param_count(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx);
+size_t ptk_anm2_param_count(struct ptk_anm2 const *doc, uint32_t id);
 
 /**
- * @brief Add a parameter to an animation item
+ * @brief Insert a parameter before the specified parameter
  *
  * Records UNDO operation.
+ * If before_param_id is 0 or invalid, the parameter is added at the end.
+ * If before_param_id is a valid parameter ID, the new parameter is inserted before it.
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @param key Parameter key
- * @param value Parameter value
- * @param err Error information
- * @return ID of the new parameter on success, 0 on failure
- */
-NODISCARD uint32_t ptk_anm2_param_add(struct ptk_anm2 *doc,
-                                      size_t sel_idx,
-                                      size_t item_idx,
-                                      char const *key,
-                                      char const *value,
-                                      struct ov_error *const err);
-
-/**
- * @brief Insert a parameter at the specified position
- *
- * Records UNDO operation.
- *
- * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @param param_idx Position to insert
+ * @param item_id Item ID
+ * @param before_param_id Parameter ID before which to insert, or 0 for end
  * @param key Parameter key
  * @param value Parameter value
  * @param err Error information
  * @return ID of the new parameter on success, 0 on failure
  */
 NODISCARD uint32_t ptk_anm2_param_insert(struct ptk_anm2 *doc,
-                                         size_t sel_idx,
-                                         size_t item_idx,
-                                         size_t param_idx,
+                                         uint32_t item_id,
+                                         uint32_t before_param_id,
                                          char const *key,
                                          char const *value,
                                          struct ov_error *const err);
 
 /**
- * @brief Remove a parameter from an animation item
+ * @brief Remove a parameter by ID
  *
  * Records UNDO operation.
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @param param_idx Parameter index
+ * @param id Parameter ID
  * @param err Error information
  * @return true on success, false on failure
  */
-NODISCARD bool ptk_anm2_param_remove(
-    struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, size_t param_idx, struct ov_error *const err);
+NODISCARD bool ptk_anm2_param_remove(struct ptk_anm2 *doc, uint32_t id, struct ov_error *const err);
 
 /**
- * @brief Get the key of a parameter
+ * @brief Get the key of a parameter by ID
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @param param_idx Parameter index
- * @return Key string (owned by doc), NULL if indices are invalid
+ * @param id Parameter ID
+ * @return Key string (owned by doc), NULL if ID is invalid
  */
-char const *ptk_anm2_param_get_key(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx, size_t param_idx);
+char const *ptk_anm2_param_get_key(struct ptk_anm2 const *doc, uint32_t id);
 
 /**
- * @brief Set the key of a parameter
+ * @brief Set the key of a parameter by ID
  *
  * Records UNDO operation.
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @param param_idx Parameter index
+ * @param id Parameter ID
  * @param key New key string
  * @param err Error information
  * @return true on success, false on failure
  */
-NODISCARD bool ptk_anm2_param_set_key(struct ptk_anm2 *doc,
-                                      size_t sel_idx,
-                                      size_t item_idx,
-                                      size_t param_idx,
-                                      char const *key,
-                                      struct ov_error *const err);
+NODISCARD bool ptk_anm2_param_set_key(struct ptk_anm2 *doc, uint32_t id, char const *key, struct ov_error *const err);
 
 /**
- * @brief Get the value of a parameter
+ * @brief Get the value of a parameter by ID
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @param param_idx Parameter index
- * @return Value string (owned by doc), NULL if indices are invalid
+ * @param id Parameter ID
+ * @return Value string (owned by doc), NULL if ID is invalid
  */
-char const *ptk_anm2_param_get_value(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx, size_t param_idx);
+char const *ptk_anm2_param_get_value(struct ptk_anm2 const *doc, uint32_t id);
 
 /**
- * @brief Set the value of a parameter
+ * @brief Set the value of a parameter by ID
  *
  * Records UNDO operation.
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @param param_idx Parameter index
+ * @param id Parameter ID
  * @param value New value string
  * @param err Error information
  * @return true on success, false on failure
  */
-NODISCARD bool ptk_anm2_param_set_value(struct ptk_anm2 *doc,
-                                        size_t sel_idx,
-                                        size_t item_idx,
-                                        size_t param_idx,
-                                        char const *value,
-                                        struct ov_error *const err);
-
-// ============================================================================
-// UNDO/REDO operations
-// ============================================================================
+NODISCARD bool
+ptk_anm2_param_set_value(struct ptk_anm2 *doc, uint32_t id, char const *value, struct ov_error *const err);
 
 /**
  * @brief Check if undo is available
@@ -741,10 +690,6 @@ NODISCARD bool ptk_anm2_begin_transaction(struct ptk_anm2 *doc, struct ov_error 
  */
 NODISCARD bool ptk_anm2_end_transaction(struct ptk_anm2 *doc, struct ov_error *const err);
 
-// ============================================================================
-// ID and userdata operations
-// ============================================================================
-
 /**
  * @brief Get the unique ID of a selector
  *
@@ -755,26 +700,6 @@ NODISCARD bool ptk_anm2_end_transaction(struct ptk_anm2 *doc, struct ov_error *c
 uint32_t ptk_anm2_selector_get_id(struct ptk_anm2 const *doc, size_t idx);
 
 /**
- * @brief Get the userdata of a selector
- *
- * @param doc Document handle
- * @param idx Selector index
- * @return Userdata value, 0 if index is invalid
- */
-uintptr_t ptk_anm2_selector_get_userdata(struct ptk_anm2 const *doc, size_t idx);
-
-/**
- * @brief Set the userdata of a selector
- *
- * This does NOT record UNDO operation (userdata is UI state, not document data).
- *
- * @param doc Document handle
- * @param idx Selector index
- * @param userdata New userdata value
- */
-void ptk_anm2_selector_set_userdata(struct ptk_anm2 *doc, size_t idx, uintptr_t userdata);
-
-/**
  * @brief Get the unique ID of an item
  *
  * @param doc Document handle
@@ -783,28 +708,6 @@ void ptk_anm2_selector_set_userdata(struct ptk_anm2 *doc, size_t idx, uintptr_t 
  * @return Unique ID, 0 if indices are invalid
  */
 uint32_t ptk_anm2_item_get_id(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx);
-
-/**
- * @brief Get the userdata of an item
- *
- * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @return Userdata value, 0 if indices are invalid
- */
-uintptr_t ptk_anm2_item_get_userdata(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx);
-
-/**
- * @brief Set the userdata of an item
- *
- * This does NOT record UNDO operation (userdata is UI state, not document data).
- *
- * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @param userdata New userdata value
- */
-void ptk_anm2_item_set_userdata(struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, uintptr_t userdata);
 
 /**
  * @brief Get the unique ID of a parameter
@@ -818,33 +721,64 @@ void ptk_anm2_item_set_userdata(struct ptk_anm2 *doc, size_t sel_idx, size_t ite
 uint32_t ptk_anm2_param_get_id(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx, size_t param_idx);
 
 /**
- * @brief Get the userdata of a parameter
+ * @brief Get the userdata of a selector by ID
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @param param_idx Parameter index
- * @return Userdata value, 0 if indices are invalid
+ * @param id Selector ID
+ * @return Userdata value, 0 if ID is invalid
  */
-uintptr_t ptk_anm2_param_get_userdata(struct ptk_anm2 const *doc, size_t sel_idx, size_t item_idx, size_t param_idx);
+uintptr_t ptk_anm2_selector_get_userdata(struct ptk_anm2 const *doc, uint32_t id);
 
 /**
- * @brief Set the userdata of a parameter
+ * @brief Set the userdata of a selector by ID
  *
  * This does NOT record UNDO operation (userdata is UI state, not document data).
  *
  * @param doc Document handle
- * @param sel_idx Selector index
- * @param item_idx Item index
- * @param param_idx Parameter index
+ * @param id Selector ID
  * @param userdata New userdata value
  */
-void ptk_anm2_param_set_userdata(
-    struct ptk_anm2 *doc, size_t sel_idx, size_t item_idx, size_t param_idx, uintptr_t userdata);
+void ptk_anm2_selector_set_userdata(struct ptk_anm2 *doc, uint32_t id, uintptr_t userdata);
 
-// ============================================================================
-// ID reverse lookup operations
-// ============================================================================
+/**
+ * @brief Get the userdata of an item by ID
+ *
+ * @param doc Document handle
+ * @param id Item ID
+ * @return Userdata value, 0 if ID is invalid
+ */
+uintptr_t ptk_anm2_item_get_userdata(struct ptk_anm2 const *doc, uint32_t id);
+
+/**
+ * @brief Set the userdata of an item by ID
+ *
+ * This does NOT record UNDO operation (userdata is UI state, not document data).
+ *
+ * @param doc Document handle
+ * @param id Item ID
+ * @param userdata New userdata value
+ */
+void ptk_anm2_item_set_userdata(struct ptk_anm2 *doc, uint32_t id, uintptr_t userdata);
+
+/**
+ * @brief Get the userdata of a parameter by ID
+ *
+ * @param doc Document handle
+ * @param id Parameter ID
+ * @return Userdata value, 0 if ID is invalid
+ */
+uintptr_t ptk_anm2_param_get_userdata(struct ptk_anm2 const *doc, uint32_t id);
+
+/**
+ * @brief Set the userdata of a parameter by ID
+ *
+ * This does NOT record UNDO operation (userdata is UI state, not document data).
+ *
+ * @param doc Document handle
+ * @param id Parameter ID
+ * @param userdata New userdata value
+ */
+void ptk_anm2_param_set_userdata(struct ptk_anm2 *doc, uint32_t id, uintptr_t userdata);
 
 /**
  * @brief Find a selector by its unique ID
@@ -854,7 +788,7 @@ void ptk_anm2_param_set_userdata(
  * @param out_sel_idx Output: selector index if found
  * @return true if found, false if not found
  */
-bool ptk_anm2_find_selector_by_id(struct ptk_anm2 const *doc, uint32_t id, size_t *out_sel_idx);
+bool ptk_anm2_find_selector(struct ptk_anm2 const *doc, uint32_t id, size_t *out_sel_idx);
 
 /**
  * @brief Find an item by its unique ID
@@ -865,7 +799,7 @@ bool ptk_anm2_find_selector_by_id(struct ptk_anm2 const *doc, uint32_t id, size_
  * @param out_item_idx Output: item index if found
  * @return true if found, false if not found
  */
-bool ptk_anm2_find_item_by_id(struct ptk_anm2 const *doc, uint32_t id, size_t *out_sel_idx, size_t *out_item_idx);
+bool ptk_anm2_find_item(struct ptk_anm2 const *doc, uint32_t id, size_t *out_sel_idx, size_t *out_item_idx);
 
 /**
  * @brief Find a parameter by its unique ID
@@ -877,5 +811,5 @@ bool ptk_anm2_find_item_by_id(struct ptk_anm2 const *doc, uint32_t id, size_t *o
  * @param out_param_idx Output: parameter index if found
  * @return true if found, false if not found
  */
-bool ptk_anm2_find_param_by_id(
+bool ptk_anm2_find_param(
     struct ptk_anm2 const *doc, uint32_t id, size_t *out_sel_idx, size_t *out_item_idx, size_t *out_param_idx);

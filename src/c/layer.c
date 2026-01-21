@@ -91,10 +91,6 @@ static void ptkl_targets_free(struct ptkl_targets *const t) {
   }
 }
 
-// ============================================================================
-// String utilities
-// ============================================================================
-
 static bool strdup_n(char **const dest, char const *const src, size_t const len, struct ov_error *const err) {
   if (!OV_REALLOC(dest, len + 1, sizeof(char))) {
     OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);

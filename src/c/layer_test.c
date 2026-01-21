@@ -73,30 +73,25 @@ bool ptk_anm2_verify_checksum(struct ptk_anm2 const *doc) {
   return true;
 }
 
-uint32_t ptk_anm2_item_insert_animation(struct ptk_anm2 *doc,
-                                        size_t sel_idx,
-                                        size_t item_idx,
-                                        char const *script_name,
-                                        char const *name,
-                                        struct ov_error *const err) {
+uint32_t ptk_anm2_item_insert_animation(
+    struct ptk_anm2 *doc, uint32_t before_id, char const *script_name, char const *name, struct ov_error *const err) {
   (void)doc;
-  (void)sel_idx;
-  (void)item_idx;
+  (void)before_id;
   (void)script_name;
   (void)name;
   (void)err;
   return 0;
 }
 
-uint32_t ptk_anm2_param_add(struct ptk_anm2 *doc,
-                            size_t sel_idx,
-                            size_t item_idx,
-                            char const *key,
-                            char const *value,
-                            struct ov_error *const err) {
+uint32_t ptk_anm2_param_insert(struct ptk_anm2 *doc,
+                               uint32_t item_id,
+                               uint32_t before_param_id,
+                               char const *key,
+                               char const *value,
+                               struct ov_error *const err) {
   (void)doc;
-  (void)sel_idx;
-  (void)item_idx;
+  (void)item_id;
+  (void)before_param_id;
   (void)key;
   (void)value;
   (void)err;
@@ -110,17 +105,19 @@ bool ptk_anm2_set_psd_path(struct ptk_anm2 *doc, char const *path, struct ov_err
   return false;
 }
 
-uint32_t ptk_anm2_selector_add(struct ptk_anm2 *doc, char const *group, struct ov_error *const err) {
+uint32_t
+ptk_anm2_selector_insert(struct ptk_anm2 *doc, uint32_t before_id, char const *group, struct ov_error *const err) {
   (void)doc;
+  (void)before_id;
   (void)group;
   (void)err;
   return 0;
 }
 
-uint32_t ptk_anm2_item_add_value(
-    struct ptk_anm2 *doc, size_t sel_idx, char const *name, char const *value, struct ov_error *const err) {
+uint32_t ptk_anm2_item_insert_value(
+    struct ptk_anm2 *doc, uint32_t before_id, char const *name, char const *value, struct ov_error *const err) {
   (void)doc;
-  (void)sel_idx;
+  (void)before_id;
   (void)name;
   (void)value;
   (void)err;

@@ -51,10 +51,6 @@ static bool is_digits(char const *const s, size_t const len) {
   return len > 0;
 }
 
-// ============================================================================
-// Script definitions
-// ============================================================================
-
 void ptk_alias_script_definitions_free(struct ptk_alias_script_definitions *const defs) {
   if (!defs || !defs->items) {
     return;
@@ -335,10 +331,6 @@ cleanup:
   return success;
 }
 
-// ============================================================================
-// Available scripts
-// ============================================================================
-
 void ptk_alias_available_scripts_free(struct ptk_alias_available_scripts *const scripts) {
   if (!scripts) {
     return;
@@ -538,10 +530,6 @@ cleanup:
   }
   return success;
 }
-
-// ============================================================================
-// Animation extraction
-// ============================================================================
 
 void ptk_alias_extracted_animation_free(struct ptk_alias_extracted_animation *const anim) {
   if (!anim) {

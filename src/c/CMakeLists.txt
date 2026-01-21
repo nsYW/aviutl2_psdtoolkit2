@@ -191,7 +191,15 @@ add_dependencies(psdtoolkit_intf ${PROJECT_NAME}_format)
 add_library(psdtoolkit SHARED
   alias.c
   anm2.c
+  anm2_edit.c
+  anm2_selection.c
   anm2editor.c
+  anm2editor_convert.c
+  anm2editor_detail.c
+  anm2editor_import.c
+  anm2editor_splitter.c
+  anm2editor_toolbar.c
+  anm2editor_treeview.c
   anm2_script_picker.c
   anm_to_anm2.c
   cache.c
@@ -274,6 +282,24 @@ target_link_libraries(test_anm2 PRIVATE
   yyjson
 )
 add_test(NAME test_anm2 COMMAND test_anm2)
+
+add_executable(test_anm2_edit anm2_edit_test.c anm2_edit.c anm2_selection.c anm2.c json.c)
+target_link_libraries(test_anm2_edit PRIVATE
+  psdtoolkit_intf
+  ovbase
+  ovl
+  yyjson
+)
+add_test(NAME test_anm2_edit COMMAND test_anm2_edit)
+
+add_executable(test_anm2_selection anm2_selection_test.c anm2_selection.c anm2.c json.c)
+target_link_libraries(test_anm2_selection PRIVATE
+  psdtoolkit_intf
+  ovbase
+  ovl
+  yyjson
+)
+add_test(NAME test_anm2_selection COMMAND test_anm2_selection)
 
 add_executable(test_alias alias_test.c alias.c ini_reader.c)
 target_link_libraries(test_alias PRIVATE
