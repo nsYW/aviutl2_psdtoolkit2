@@ -161,15 +161,15 @@ cleanup:
 static wchar_t const *get_window_title(void) {
   static wchar_t buf[64];
   if (!buf[0]) {
-    ov_snprintf_char2wchar(buf, sizeof(buf) / sizeof(buf[0]), "%1$hs", "%1$hs", gettext("PSDToolKit anm2 Editor"));
+    ov_snprintf_wchar(buf, sizeof(buf) / sizeof(buf[0]), L"%1$hs", L"%1$hs", gettext("PSDToolKit anm2 Editor"));
   }
   return buf;
 }
 
 static void show_error_dialog(struct ptk_anm2editor *editor, struct ov_error *const err) {
   wchar_t msg[256];
-  ov_snprintf_char2wchar(
-      msg, sizeof(msg) / sizeof(msg[0]), "%1$hs", "%1$hs", pgettext("anm2editor", "An error occurred."));
+  ov_snprintf_wchar(
+      msg, sizeof(msg) / sizeof(msg[0]), L"%1$hs", L"%1$hs", pgettext("anm2editor", "An error occurred."));
   ptk_error_dialog(editor->window, err, get_window_title(), msg, NULL, TD_ERROR_ICON, TDCBF_OK_BUTTON);
   OV_ERROR_DESTROY(err);
 }
@@ -899,11 +899,11 @@ static bool confirm_discard_changes(struct ptk_anm2editor *editor) {
   }
 
   wchar_t main_instruction[256];
-  ov_snprintf_char2wchar(main_instruction,
-                         sizeof(main_instruction) / sizeof(main_instruction[0]),
-                         NULL,
-                         pgettext("anm2editor", "Do you want to save changes before closing?"),
-                         NULL);
+  ov_snprintf_wchar(main_instruction,
+                    sizeof(main_instruction) / sizeof(main_instruction[0]),
+                    L"%hs",
+                    L"%hs",
+                    pgettext("anm2editor", "Do you want to save changes before closing?"));
 
   int const button_id = ptk_dialog_show(&(struct ptk_dialog_params){
       .owner = editor->window,
@@ -938,7 +938,7 @@ static LRESULT CALLBACK anm2editor_wnd_proc(HWND hwnd, UINT message, WPARAM wpar
 
     struct ov_error err = {0};
     if (!handle_wm_create(editor, hwnd, &err)) {
-      ptk_logf_error(&err, "%1$hs", "%1$hs", gettext("failed to create anm2editor window."));
+      ptk_logf_error(&err, "%1$hs", "%1$hs", gettext("failed to create window."));
       OV_ERROR_DESTROY(&err);
       return -1;
     }
@@ -1263,8 +1263,7 @@ bool ptk_anm2editor_open(struct ptk_anm2editor *editor, wchar_t const *path, str
 
     // Show open dialog
     wchar_t title[256];
-    ov_snprintf_char2wchar(
-        title, sizeof(title) / sizeof(title[0]), "%1$hs", "%1$hs", pgettext("anm2editor", "Open"), NULL);
+    ov_snprintf_wchar(title, sizeof(title) / sizeof(title[0]), L"%1$hs", L"%1$hs", pgettext("anm2editor", "Open"));
     if (!ovl_dialog_select_file(
             editor->window, title, get_file_filter(), &g_file_dialog_guid, default_dir, &selected_path, err)) {
       if (ov_error_is(err, ov_error_type_hresult, (int)HRESULT_FROM_WIN32(ERROR_CANCELLED))) {
@@ -1294,18 +1293,18 @@ bool ptk_anm2editor_open(struct ptk_anm2editor *editor, wchar_t const *path, str
   if (checksum_result == ov_false) {
     wchar_t main_instr[256];
     wchar_t content[512];
-    ov_snprintf_char2wchar(main_instr,
-                           sizeof(main_instr) / sizeof(main_instr[0]),
-                           NULL,
-                           pgettext("anm2editor", "Do you want to continue opening this file?"),
-                           NULL);
-    ov_snprintf_char2wchar(content,
-                           sizeof(content) / sizeof(content[0]),
-                           NULL,
-                           pgettext("anm2editor",
-                                    "This file appears to have been manually edited. "
-                                    "If you continue editing in this editor, the manual changes may be lost."),
-                           NULL);
+    ov_snprintf_wchar(main_instr,
+                      sizeof(main_instr) / sizeof(main_instr[0]),
+                      L"%hs",
+                      L"%hs",
+                      pgettext("anm2editor", "Do you want to continue opening this file?"));
+    ov_snprintf_wchar(content,
+                      sizeof(content) / sizeof(content[0]),
+                      L"%hs",
+                      L"%hs",
+                      pgettext("anm2editor",
+                               "This file appears to have been manually edited. "
+                               "If you continue editing in this editor, the manual changes may be lost."));
     int result = ptk_dialog_show(&(struct ptk_dialog_params){
         .owner = editor->window,
         .icon = TD_WARNING_ICON,
@@ -1441,8 +1440,7 @@ bool ptk_anm2editor_save_as(struct ptk_anm2editor *editor, struct ov_error *err)
   // Show save dialog
   {
     wchar_t title[256];
-    ov_snprintf_char2wchar(
-        title, sizeof(title) / sizeof(title[0]), "%1$hs", "%1$hs", pgettext("anm2editor", "Save As"), NULL);
+    ov_snprintf_wchar(title, sizeof(title) / sizeof(title[0]), L"%1$hs", L"%1$hs", pgettext("anm2editor", "Save As"));
     if (!ovl_dialog_save_file(
             editor->window, title, get_file_filter(), &g_file_dialog_guid, default_path, NULL, &selected_path, err)) {
       if (ov_error_is(err, ov_error_type_hresult, (int)HRESULT_FROM_WIN32(ERROR_CANCELLED))) {
@@ -1522,7 +1520,7 @@ static bool check_psd_path_mismatch(struct ptk_anm2editor *editor, char const *p
   }
   // Mismatch - show warning dialog
   wchar_t main_instr[256];
-  ov_snprintf_char2wchar(main_instr, 256, NULL, pgettext("anm2editor", "Do you want to continue adding?"));
+  ov_snprintf_wchar(main_instr, 256, L"%hs", L"%hs", pgettext("anm2editor", "Do you want to continue adding?"));
   wchar_t content[512];
   ov_snprintf_char2wchar(content,
                          512,

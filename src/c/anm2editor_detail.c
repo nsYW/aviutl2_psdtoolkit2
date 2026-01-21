@@ -44,7 +44,7 @@ static void report_error(struct anm2editor_detail *detail, struct ov_error *err)
   if (detail->callbacks.on_error) {
     detail->callbacks.on_error(detail->callbacks.userdata, err);
   } else {
-    ptk_logf_error(err, "%1$hs", "%1$hs", gettext("failed to perform detail operation."));
+    ptk_logf_error(err, "%1$hs", "%1$hs", gettext("Operation failed."));
     OV_ERROR_DESTROY(err);
   }
 }
@@ -494,19 +494,29 @@ struct anm2editor_detail *anm2editor_detail_create(void *parent_window,
   SetPropW(detail->listview, L"anm2editor_detail", detail);
 
   // Add columns
-  // Note: Column headers should be set by the caller via a localization function
-  // For now, we use generic names that the caller can override
   {
+    wchar_t prop_header[64], value_header[64];
+    ov_snprintf_wchar(prop_header,
+                      sizeof(prop_header) / sizeof(prop_header[0]),
+                      L"%1$hs",
+                      L"%1$hs",
+                      pgettext("anm2editor", "Property"));
+    ov_snprintf_wchar(value_header,
+                      sizeof(value_header) / sizeof(value_header[0]),
+                      L"%1$hs",
+                      L"%1$hs",
+                      pgettext("anm2editor", "Value"));
+
     LVCOLUMNW lvc = {
         .mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT,
         .fmt = LVCFMT_LEFT,
         .cx = 120,
-        .pszText = L"Property",
+        .pszText = prop_header,
     };
     SendMessageW(detail->listview, LVM_INSERTCOLUMNW, 0, (LPARAM)&lvc);
 
     lvc.cx = 200;
-    lvc.pszText = L"Value";
+    lvc.pszText = value_header;
     SendMessageW(detail->listview, LVM_INSERTCOLUMNW, 1, (LPARAM)&lvc);
   }
 
@@ -808,8 +818,8 @@ bool anm2editor_detail_add_row(struct anm2editor_detail *detail,
   int const idx = (int)SendMessageW(detail->listview, LVM_GETITEMCOUNT, 0, 0);
   wchar_t prop_buf[256];
   wchar_t val_buf[512];
-  ov_snprintf_char2wchar(prop_buf, sizeof(prop_buf) / sizeof(prop_buf[0]), "%1$hs", "%1$hs", property ? property : "");
-  ov_snprintf_char2wchar(val_buf, sizeof(val_buf) / sizeof(val_buf[0]), "%1$hs", "%1$hs", value ? value : "");
+  ov_snprintf_wchar(prop_buf, sizeof(prop_buf) / sizeof(prop_buf[0]), L"%1$hs", L"%1$hs", property ? property : "");
+  ov_snprintf_wchar(val_buf, sizeof(val_buf) / sizeof(val_buf[0]), L"%1$hs", L"%1$hs", value ? value : "");
 
   SendMessageW(detail->listview,
                LVM_INSERTITEMW,
@@ -841,8 +851,8 @@ void anm2editor_detail_update_row(struct anm2editor_detail *detail,
 
   wchar_t prop_buf[256];
   wchar_t val_buf[512];
-  ov_snprintf_char2wchar(prop_buf, sizeof(prop_buf) / sizeof(prop_buf[0]), "%1$hs", "%1$hs", property ? property : "");
-  ov_snprintf_char2wchar(val_buf, sizeof(val_buf) / sizeof(val_buf[0]), "%1$hs", "%1$hs", value ? value : "");
+  ov_snprintf_wchar(prop_buf, sizeof(prop_buf) / sizeof(prop_buf[0]), L"%1$hs", L"%1$hs", property ? property : "");
+  ov_snprintf_wchar(val_buf, sizeof(val_buf) / sizeof(val_buf[0]), L"%1$hs", L"%1$hs", value ? value : "");
 
   LVITEMW lvi = {
       .iItem = (int)row_index,
@@ -874,8 +884,8 @@ bool anm2editor_detail_insert_row(struct anm2editor_detail *detail,
 
   wchar_t prop_buf[256];
   wchar_t val_buf[512];
-  ov_snprintf_char2wchar(prop_buf, sizeof(prop_buf) / sizeof(prop_buf[0]), "%1$hs", "%1$hs", property ? property : "");
-  ov_snprintf_char2wchar(val_buf, sizeof(val_buf) / sizeof(val_buf[0]), "%1$hs", "%1$hs", value ? value : "");
+  ov_snprintf_wchar(prop_buf, sizeof(prop_buf) / sizeof(prop_buf[0]), L"%1$hs", L"%1$hs", property ? property : "");
+  ov_snprintf_wchar(val_buf, sizeof(val_buf) / sizeof(val_buf[0]), L"%1$hs", L"%1$hs", value ? value : "");
 
   SendMessageW(detail->listview,
                LVM_INSERTITEMW,
@@ -1211,11 +1221,11 @@ intptr_t anm2editor_detail_handle_notify(struct anm2editor_detail *detail, void 
         HMENU hMenu = CreatePopupMenu();
         if (hMenu) {
           wchar_t delete_text[64];
-          ov_snprintf_char2wchar(delete_text,
-                                 sizeof(delete_text) / sizeof(delete_text[0]),
-                                 "%1$hs",
-                                 "%1$hs",
-                                 pgettext("anm2editor", "Delete"));
+          ov_snprintf_wchar(delete_text,
+                            sizeof(delete_text) / sizeof(delete_text[0]),
+                            L"%1$hs",
+                            L"%1$hs",
+                            pgettext("anm2editor", "Delete"));
           AppendMenuW(hMenu, MF_STRING, 1, delete_text);
 
           POINT pt;

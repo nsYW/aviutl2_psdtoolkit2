@@ -1424,7 +1424,7 @@ void ptk_anm2_edit_format_selector_display_name(struct ptk_anm2_edit const *edit
   if (!group || group[0] == '\0') {
     group = pgettext("anm2editor", "(Unnamed Selector)");
   }
-  ov_snprintf_char2wchar(out, out_len, "%hs", "%hs", group);
+  ov_snprintf_wchar(out, out_len, L"%hs", L"%hs", group);
 }
 
 void ptk_anm2_edit_format_item_display_name(struct ptk_anm2_edit const *edit,
@@ -1440,9 +1440,9 @@ void ptk_anm2_edit_format_item_display_name(struct ptk_anm2_edit const *edit,
   }
   if (ptk_anm2_item_is_animation(edit->doc, item_id)) {
     char const *script_name = ptk_anm2_item_get_script_name(edit->doc, item_id);
-    ov_snprintf_char2wchar(out, out_len, "%1$hs%2$hs", "[%1$hs] %2$hs", script_name, name);
+    ov_snprintf_wchar(out, out_len, L"%1$hs%2$hs", L"[%1$hs] %2$hs", script_name, name);
   } else {
-    ov_snprintf_char2wchar(out, out_len, "%1$hs", "%1$hs", name);
+    ov_snprintf_wchar(out, out_len, L"%1$hs", L"%1$hs", name);
   }
 }
 

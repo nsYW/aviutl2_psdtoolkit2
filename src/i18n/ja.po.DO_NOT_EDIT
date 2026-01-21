@@ -135,6 +135,10 @@ msgctxt "gui"
 msgid "Capture"
 msgstr "取り込む"
 
+msgctxt ".ptk.anm2 OverwriteSelector"
+msgid "Character ID"
+msgstr "キャラクターID"
+
 msgctxt "anm2editor"
 msgid "Conversion completed."
 msgstr "変換が完了しました。"
@@ -172,6 +176,10 @@ msgstr ""
 msgctxt "config"
 msgid "Debug"
 msgstr "デバッグ"
+
+msgctxt "anm2editor"
+msgid "Default Character ID"
+msgstr "キャラクターIDのデフォルト値"
 
 msgctxt "anm2editor"
 msgid "Delete"
@@ -299,6 +307,10 @@ msgstr "開く"
 msgid "Operation failed."
 msgstr "処理に失敗しました。"
 
+msgctxt ".ptk.anm2 multi-script section name"
+msgid "OverwriteSelector"
+msgstr "パーツ上書き"
+
 msgctxt ".ptk.anm2 label"
 msgid "PSD"
 msgstr "PSD"
@@ -397,6 +409,10 @@ msgid "Select scripts to import:"
 msgstr "取り込むスクリプトを選択:"
 
 msgctxt ".ptk.anm2 default name for unnamed selector"
+msgid "Selector"
+msgstr "セレクター"
+
+msgctxt ".ptk.anm2 multi-script section name"
 msgid "Selector"
 msgstr "セレクター"
 
@@ -527,11 +543,11 @@ msgstr "エディットセクションがありません。"
 msgid "failed to add PSD file."
 msgstr "PSDファイルの追加に失敗しました。"
 
+msgid "failed to create window."
+msgstr "ウィンドウの作成に失敗しました。"
+
 msgid "failed to draw PSD image."
 msgstr "PSD画像の描画に失敗しました。"
-
-msgid "failed to end transaction in error recovery."
-msgstr "エラーからのリカバリー中にトランザクションを閉じるのに失敗しました。"
 
 msgid "failed to get %1$hs on %2$hs."
 msgstr "%2$hs 上の %1$hs の取得に失敗しました。"

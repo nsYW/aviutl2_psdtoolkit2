@@ -57,7 +57,7 @@ static void report_error(struct anm2editor_treeview *tv, struct ov_error *err) {
   if (tv->callbacks.on_error) {
     tv->callbacks.on_error(tv->callbacks.userdata, err);
   } else {
-    ptk_logf_error(err, "%1$hs", "%1$hs", gettext("failed to perform treeview operation."));
+    ptk_logf_error(err, "%1$hs", "%1$hs", gettext("Operation failed."));
     OV_ERROR_DESTROY(err);
   }
 }
@@ -1190,27 +1190,27 @@ intptr_t anm2editor_treeview_handle_notify(struct anm2editor_treeview *tv, void 
       if (hMenu) {
         wchar_t rename_text[64];
         wchar_t delete_text[64];
-        ov_snprintf_char2wchar(rename_text,
-                               sizeof(rename_text) / sizeof(rename_text[0]),
-                               "%1$hs",
-                               "%1$hs",
-                               pgettext("anm2editor", "Rename"));
-        ov_snprintf_char2wchar(delete_text,
-                               sizeof(delete_text) / sizeof(delete_text[0]),
-                               "%1$hs",
-                               "%1$hs",
-                               pgettext("anm2editor", "Delete"));
+        ov_snprintf_wchar(rename_text,
+                          sizeof(rename_text) / sizeof(rename_text[0]),
+                          L"%1$hs",
+                          L"%1$hs",
+                          pgettext("anm2editor", "Rename"));
+        ov_snprintf_wchar(delete_text,
+                          sizeof(delete_text) / sizeof(delete_text[0]),
+                          L"%1$hs",
+                          L"%1$hs",
+                          pgettext("anm2editor", "Delete"));
         AppendMenuW(hMenu, MF_STRING, CMD_RENAME, rename_text);
         AppendMenuW(hMenu, MF_STRING, CMD_DELETE, delete_text);
 
         if (is_selector) {
           AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
           wchar_t reverse_text[64];
-          ov_snprintf_char2wchar(reverse_text,
-                                 sizeof(reverse_text) / sizeof(reverse_text[0]),
-                                 "%1$hs",
-                                 "%1$hs",
-                                 pgettext("anm2editor", "Reverse Items"));
+          ov_snprintf_wchar(reverse_text,
+                            sizeof(reverse_text) / sizeof(reverse_text[0]),
+                            L"%1$hs",
+                            L"%1$hs",
+                            pgettext("anm2editor", "Reverse Items"));
           // Check if selector has items to reverse
           bool const can_rev = tv->edit && ptk_anm2_edit_item_count(tv->edit, info.id) > 0;
           UINT const flags = can_rev ? MF_STRING : (MF_STRING | MF_GRAYED);
@@ -1248,11 +1248,11 @@ intptr_t anm2editor_treeview_handle_notify(struct anm2editor_treeview *tv, void 
       HMENU hMenu = CreatePopupMenu();
       if (hMenu) {
         wchar_t add_selector_text[64];
-        ov_snprintf_char2wchar(add_selector_text,
-                               sizeof(add_selector_text) / sizeof(add_selector_text[0]),
-                               "%1$hs",
-                               "%1$hs",
-                               pgettext("anm2editor", "Add Selector"));
+        ov_snprintf_wchar(add_selector_text,
+                          sizeof(add_selector_text) / sizeof(add_selector_text[0]),
+                          L"%1$hs",
+                          L"%1$hs",
+                          pgettext("anm2editor", "Add Selector"));
         AppendMenuW(hMenu, MF_STRING, CMD_ADD_SELECTOR, add_selector_text);
 
         int const cmd =

@@ -18,7 +18,7 @@
 static wchar_t const *get_window_title(void) {
   static wchar_t buf[64];
   if (!buf[0]) {
-    ov_snprintf_char2wchar(buf, sizeof(buf) / sizeof(buf[0]), NULL, pgettext("anm2editor", "Anm2 Editor"), NULL);
+    ov_snprintf_wchar(buf, sizeof(buf) / sizeof(buf[0]), L"%1$hs", L"%1$hs", gettext("PSDToolKit anm2 Editor"));
   }
   return buf;
 }
@@ -78,8 +78,8 @@ bool anm2editor_convert_execute(void *const parent_window,
     // {83F03793-4997-442C-A4E4-AEE63D6117FC}
     static GUID const open_dialog_guid = {0x83f03793, 0x4997, 0x442c, {0xa4, 0xe4, 0xae, 0xe6, 0x3d, 0x61, 0x17, 0xfc}};
     wchar_t title[256];
-    ov_snprintf_char2wchar(
-        title, sizeof(title) / sizeof(title[0]), NULL, pgettext("anm2editor", "Select *.anm to convert"), NULL);
+    ov_snprintf_wchar(
+        title, sizeof(title) / sizeof(title[0]), L"%hs", L"%hs", pgettext("anm2editor", "Select *.anm to convert"));
     if (!ovl_dialog_select_file(hwnd, title, get_anm_file_filter(), &open_dialog_guid, script_dir, &src_path, err)) {
       if (ov_error_is(err, ov_error_type_hresult, (int)HRESULT_FROM_WIN32(ERROR_CANCELLED))) {
         cancelled = true;
@@ -148,8 +148,8 @@ bool anm2editor_convert_execute(void *const parent_window,
     // {B979B21D-C448-4079-A94F-DCD12FC8D15C}
     static GUID const save_dialog_guid = {0xb979b21d, 0xc448, 0x4079, {0xa9, 0x4f, 0xdc, 0xd1, 0x2f, 0xc8, 0xd1, 0x5c}};
     wchar_t title[256];
-    ov_snprintf_char2wchar(
-        title, sizeof(title) / sizeof(title[0]), NULL, pgettext("anm2editor", "Save converted *.anm2"), NULL);
+    ov_snprintf_wchar(
+        title, sizeof(title) / sizeof(title[0]), L"%hs", L"%hs", pgettext("anm2editor", "Save converted *.anm2"));
     if (!ovl_dialog_save_file(hwnd,
                               title,
                               get_anm2_convert_save_filter(),
@@ -190,16 +190,16 @@ bool anm2editor_convert_execute(void *const parent_window,
   {
     wchar_t msg[256];
     wchar_t content[512];
-    ov_snprintf_char2wchar(
-        msg, sizeof(msg) / sizeof(msg[0]), NULL, pgettext("anm2editor", "Conversion completed."), NULL);
-    ov_snprintf_char2wchar(
+    ov_snprintf_wchar(
+        msg, sizeof(msg) / sizeof(msg[0]), L"%hs", L"%hs", pgettext("anm2editor", "Conversion completed."));
+    ov_snprintf_wchar(
         content,
         sizeof(content) / sizeof(content[0]),
-        NULL,
+        L"%hs",
+        L"%hs",
         pgettext("anm2editor",
                  "Note: This conversion uses simple string replacement and may not work correctly in all cases.\n"
-                 "Also, this converted script is different from *.ptk.anm2 and cannot be edited in this editor."),
-        NULL);
+                 "Also, this converted script is different from *.ptk.anm2 and cannot be edited in this editor."));
     ptk_dialog_show(&(struct ptk_dialog_params){
         .owner = hwnd,
         .icon = TD_INFORMATION_ICON,

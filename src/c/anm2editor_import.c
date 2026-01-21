@@ -124,7 +124,7 @@ static bool compare_psd_paths(char const *path1, char const *path2) {
 static wchar_t const *get_window_title(void) {
   static wchar_t buf[64];
   if (!buf[0]) {
-    ov_snprintf_char2wchar(buf, sizeof(buf) / sizeof(buf[0]), NULL, pgettext("anm2editor", "Anm2 Editor"), NULL);
+    ov_snprintf_wchar(buf, sizeof(buf) / sizeof(buf[0]), L"%1$hs", L"%1$hs", gettext("PSDToolKit anm2 Editor"));
   }
   return buf;
 }
@@ -132,17 +132,17 @@ static wchar_t const *get_window_title(void) {
 static void show_hint_dialog(void *const parent_window, struct ov_error *const err) {
   wchar_t msg[256];
   wchar_t hint_text[768];
-  ov_snprintf_char2wchar(
-      msg, sizeof(msg) / sizeof(msg[0]), NULL, pgettext("anm2editor", "Welcome to Script Importer!"), NULL);
-  ov_snprintf_char2wchar(hint_text,
-                         768,
-                         NULL,
-                         pgettext("anm2editor",
-                                  "1. Select a PSD File object in AviUtl ExEdit2\n"
-                                  "2. Add effects like \"Blinker@PSDToolKit\" and configure them\n"
-                                  "3. Press this button\n\n"
-                                  "This feature imports animation settings from the selected PSD File object."),
-                         NULL);
+  ov_snprintf_wchar(
+      msg, sizeof(msg) / sizeof(msg[0]), L"%hs", L"%hs", pgettext("anm2editor", "Welcome to Script Importer!"));
+  ov_snprintf_wchar(hint_text,
+                    768,
+                    L"%hs",
+                    L"%hs",
+                    pgettext("anm2editor",
+                             "1. Select a PSD File object in AviUtl ExEdit2\n"
+                             "2. Add effects like \"Blinker@PSDToolKit\" and configure them\n"
+                             "3. Press this button\n\n"
+                             "This feature imports animation settings from the selected PSD File object."));
   ptk_error_dialog((HWND)parent_window, err, get_window_title(), msg, hint_text, TD_INFORMATION_ICON, TDCBF_OK_BUTTON);
 }
 

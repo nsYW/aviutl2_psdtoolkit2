@@ -1066,8 +1066,8 @@ static bool build_popup_menu(HMENU *const menu,
     } else {
       // No ptkl targets in selected selector
       wchar_t text[256];
-      ov_snprintf_char2wchar(
-          text, 256, NULL, gettext("No assignable parameters found in selected selector in anm2 Editor."));
+      ov_snprintf_wchar(
+          text, 256, L"%hs", L"%hs", gettext("No assignable parameters found in selected selector in anm2 Editor."));
       AppendMenuW(*menu, MF_STRING | MF_GRAYED, 0, text);
     }
   }
@@ -1387,7 +1387,7 @@ cleanup:
       msg = gettext("Operation failed.");
       break;
     }
-    ov_snprintf_char2wchar(main_instruction, sizeof(main_instruction) / sizeof(main_instruction[0]), NULL, msg, NULL);
+    ov_snprintf_wchar(main_instruction, sizeof(main_instruction) / sizeof(main_instruction[0]), L"%hs", L"%hs", msg);
     ptk_logf_error(&err, NULL, NULL);
     ptk_error_dialog(hwnd, &err, L"PSDToolKit", main_instruction, NULL, TD_ERROR_ICON, TDCBF_OK_BUTTON);
     OV_ERROR_DESTROY(&err);

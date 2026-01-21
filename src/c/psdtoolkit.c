@@ -629,17 +629,17 @@ process_update_editing_image_state(struct psdtoolkit *ptk, char const *file_path
     wchar_t main_instruction[256];
     wchar_t content[256];
     wchar_t detail[1024];
-    ov_snprintf_char2wchar(main_instruction,
-                           256,
-                           NULL,
-                           gettext("A different PSD file is assigned to the destination. Do you want to continue?"),
-                           NULL);
-    ov_snprintf_char2wchar(
+    ov_snprintf_wchar(main_instruction,
+                      256,
+                      L"%hs",
+                      L"%hs",
+                      gettext("A different PSD file is assigned to the destination. Do you want to continue?"));
+    ov_snprintf_wchar(
         content,
         256,
-        NULL,
-        gettext("Note: Uncheck the safeguard checkbox in the PSD object settings to disable this dialog."),
-        NULL);
+        L"%hs",
+        L"%hs",
+        gettext("Note: Uncheck the safeguard checkbox in the PSD object settings to disable this dialog."));
     ov_snprintf_char2wchar(detail,
                            1024,
                            NULL,
