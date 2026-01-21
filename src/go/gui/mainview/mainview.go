@@ -13,6 +13,16 @@ import (
 	"psdtoolkit/nkhelper"
 )
 
+// Cursor types (matches w32.Cursor* constants)
+const (
+	CursorArrow   = 0
+	CursorHand    = 1
+	CursorSizeWE  = 2
+	CursorSizeNS  = 3
+	CursorSizeAll = 4
+	CursorWait    = 5
+)
+
 type MainView struct {
 	renderedImage *image.NRGBA
 	resizedImage  *image.NRGBA
@@ -35,11 +45,22 @@ type MainView struct {
 	// Using optional pattern instead of flags for cleaner state management
 	pendingViewState *pendingState
 
+	// Drag-to-pan state
+	dragging    bool
+	dragStartX  int32
+	dragStartY  int32
+	dragScrollX nk.Uint
+	dragScrollY nk.Uint
+
 	minZoom  float32
 	maxZoom  float32
 	stepZoom float32
 	zoom     float64
 	zooming  bool
+
+	// Cursor change callback (set by GUI to change window cursor)
+	onCursorChange func(cursor int)
+	cursorInCanvas bool // Track if cursor was in canvas area
 
 	queue chan func()
 }
@@ -86,6 +107,12 @@ func (mv *MainView) SetZoomRange(min, max, step float32) {
 	mv.minZoom = min
 	mv.maxZoom = max
 	mv.stepZoom = step
+}
+
+// SetCursorChangeCallback sets the callback for cursor changes.
+// The callback receives cursor type (use w32.CursorArrow, w32.CursorSizeAll, etc.)
+func (mv *MainView) SetCursorChangeCallback(fn func(cursor int)) {
+	mv.onCursorChange = fn
 }
 
 // GetViewState returns the current view state (zoom and relative scroll positions)
@@ -176,17 +203,72 @@ eat:
 
 	nk.NkLayoutRowDynamic(ctx, winHeight-bottomPaneHeight-padding, 1)
 	if nk.NkGroupScrolledOffsetBegin(ctx, &mv.scrollX, &mv.scrollY, "CanvasPane", 0) != 0 {
-		if nk.NkInputIsKeyDown(ctx.Input(), nk.KeyCtrl) != 0 {
-			m := ctx.Input().Mouse()
-			if v := m.ScrollDelta(); v.Y() != 0.0 {
-				if v.Y() < 0 {
-					mv.zoom = math.Min(mv.zoom+float64(mv.stepZoom)*100, float64(mv.maxZoom))
-				} else {
-					mv.zoom = math.Max(mv.zoom-float64(mv.stepZoom)*100, float64(mv.minZoom))
-				}
-				nkhelper.ResetScrollDelta(ctx)
+		// Mouse wheel for zoom
+		m := ctx.Input().Mouse()
+		if v := m.ScrollDelta(); v.Y() != 0.0 {
+			if v.Y() < 0 {
+				mv.zoom = math.Min(mv.zoom+float64(mv.stepZoom)*100, float64(mv.maxZoom))
+			} else {
+				mv.zoom = math.Max(mv.zoom-float64(mv.stepZoom)*100, float64(mv.minZoom))
+			}
+			nkhelper.ResetScrollDelta(ctx)
+		}
+
+		// Left mouse button drag-to-pan (only start if mouse pressed inside this pane)
+		canvasRgn := nk.NkWindowGetContentRegion(ctx)
+		mx, my := ctx.Input().Mouse().Pos()
+		mouseInCanvas := float32(mx) >= canvasRgn.X() && float32(mx) <= canvasRgn.X()+canvasRgn.W() &&
+			float32(my) >= canvasRgn.Y() && float32(my) <= canvasRgn.Y()+canvasRgn.H()
+
+		// Update cursor when entering/leaving canvas area
+		if mv.onCursorChange != nil && mouseInCanvas != mv.cursorInCanvas {
+			mv.cursorInCanvas = mouseInCanvas
+			if mouseInCanvas {
+				mv.onCursorChange(CursorSizeAll) // Move/pan cursor
+			} else {
+				mv.onCursorChange(CursorArrow)
 			}
 		}
+
+		// Use IsMousePressed to detect the exact moment when button was pressed
+		if nk.NkInputIsMousePressed(ctx.Input(), nk.ButtonLeft) != 0 && mouseInCanvas {
+			mv.dragging = true
+			mv.dragStartX = mx
+			mv.dragStartY = my
+			mv.dragScrollX = mv.scrollX
+			mv.dragScrollY = mv.scrollY
+		}
+		if mv.dragging {
+			if nk.NkInputIsMouseDown(ctx.Input(), nk.ButtonLeft) != 0 {
+				dx := int32(mv.dragStartX - mx)
+				dy := int32(mv.dragStartY - my)
+				// Clamp to prevent underflow/overflow (nk.Uint is unsigned)
+				newScrollX := int32(mv.dragScrollX) + dx
+				newScrollY := int32(mv.dragScrollY) + dy
+				if newScrollX < 0 {
+					newScrollX = 0
+				}
+				if newScrollY < 0 {
+					newScrollY = 0
+				}
+				// Calculate max scroll based on previous frame's workspace size
+				winWidth := int32(canvasRgn.W())
+				winHeight := int32(canvasRgn.H())
+				maxScrollX := int32(mv.latestWorkspaceSize.X) - winWidth
+				maxScrollY := int32(mv.latestWorkspaceSize.Y) - winHeight
+				if maxScrollX > 0 && newScrollX > maxScrollX {
+					newScrollX = maxScrollX
+				}
+				if maxScrollY > 0 && newScrollY > maxScrollY {
+					newScrollY = maxScrollY
+				}
+				mv.scrollX = nk.Uint(newScrollX)
+				mv.scrollY = nk.Uint(newScrollY)
+			} else {
+				mv.dragging = false
+			}
+		}
+
 		mv.renderCanvas(ctx)
 		nk.NkGroupEnd(ctx)
 	}

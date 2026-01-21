@@ -148,6 +148,7 @@ func (w *window) Scale() float32        { return w.w.Scale() }
 func (w *window) SetShouldClose(v bool) { w.w.SetShouldClose(v) }
 func (w *window) ShouldClose() bool     { return w.w.ShouldClose() }
 func (w *window) NativeWindow() uintptr { return uintptr(w.w.Handle) }
+func (w *window) SetCursor(cursor int)  { w.w.SetCursor(cursor) }
 func (w *window) SetDropCallback(fn func(w *window, filenames []string)) {
 	w.w.SetDropCallback(func(_ *w32.Window, filenames []string) {
 		fn(w, filenames)

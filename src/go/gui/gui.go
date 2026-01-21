@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-ui/nuklear/nk"
+	"github.com/golang-ui/nuklear/nk/w32"
 	"github.com/pkg/errors"
 
 	"psdtoolkit/clipboard"
@@ -69,6 +70,7 @@ type GUI struct {
 	splitterDragging      bool
 	splitterStartMouseX   int32
 	splitterStartWidthDip float32
+	splitterCursorActive  bool           // Track if resize cursor is active
 	lastSelectedIndex     int            // Track last selected index for view state management
 	lastSplitterWidth     float32        // Track last snapshot splitter width to detect changes
 	lastViewState         *img.ViewState // Cache last saved view state to avoid redundant updates
@@ -242,6 +244,12 @@ func (g *GUI) Init(caption string, bgImg, symbolFont []byte) error {
 		return errors.Wrap(err, "gui: failed to initialize mainview")
 	}
 	g.mainView.SetZoomRange(-5, 0, 0.001)
+	g.mainView.SetCursorChangeCallback(func(cursor int) {
+		// Only update canvas cursor if splitter is not active
+		if !g.splitterCursorActive {
+			g.window.SetCursor(cursor)
+		}
+	})
 	close(g.ready)
 	return nil
 }
@@ -471,6 +479,16 @@ func (g *GUI) update() {
 					col.SetA(24)
 				}
 				nk.NkFillRect(canvas, rect, 0, col)
+			}
+			// Change cursor when hovering over splitter or dragging (only on state change)
+			needResizeCursor := hovered || g.splitterDragging
+			if needResizeCursor != g.splitterCursorActive {
+				g.splitterCursorActive = needResizeCursor
+				if needResizeCursor {
+					g.window.SetCursor(w32.CursorSizeWE)
+				} else {
+					g.window.SetCursor(w32.CursorArrow)
+				}
 			}
 			if hovered && nk.NkInputIsMousePressed(ctx.Input(), nk.ButtonLeft) != 0 {
 				g.splitterDragging = true

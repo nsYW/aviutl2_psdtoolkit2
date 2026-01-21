@@ -13,10 +13,6 @@ require (
 	golang.org/x/text v0.22.0
 )
 
-require (
-	github.com/gopherjs/gopherjs v1.17.2 // indirect
-	github.com/veandco/go-sdl2 v0.4.40 // indirect
-	github.com/xlab/android-go v0.0.0-20221106204035-3cc54d5032fa // indirect
-)
+require github.com/gopherjs/gopherjs v1.17.2 // indirect
 
-replace github.com/golang-ui/nuklear v0.0.0-20260112162633-30b3743ea7ae => github.com/oov/nuklear v0.0.0-20260113024030-32563aa46fc7
+replace github.com/golang-ui/nuklear v0.0.0-20260112162633-30b3743ea7ae => github.com/oov/nuklear v0.0.0-20260121083529-472bd03c028b
