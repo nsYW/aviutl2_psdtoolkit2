@@ -861,6 +861,48 @@ generate_parts_override_script(struct ptk_anm2 const *const doc, char **const co
 
   // Note: Header (@OverwriteSelector) is added by caller (generate_obj2_content)
 
+  // --label: line (only if label is set and not empty)
+  if (doc->label && doc->label[0] != '\0') {
+    if (!ov_sprintf_append_char(content, err, "%1$hs", "--label:%1$hs\n", doc->label)) {
+      OV_ERROR_ADD_TRACE(err);
+      goto cleanup;
+    }
+  }
+
+  // --information: line
+  {
+    if (doc->information && doc->information[0] != '\0') {
+      // Use custom information text
+      if (!ov_sprintf_append_char(content, err, "%1$s", "--information:%1$s\n", doc->information)) {
+        OV_ERROR_ADD_TRACE(err);
+        goto cleanup;
+      }
+    } else {
+      // Auto-generate from PSD filename
+      // Extract filename from path (find last / or \)
+      char const *filename = doc->psd_path ? doc->psd_path : "";
+      if (doc->psd_path) {
+        for (char const *p = doc->psd_path; *p; p++) {
+          if (*p == '/' || *p == '\\') {
+            filename = p + 1;
+          }
+        }
+      }
+      if (filename && filename[0] != '\0') {
+        char info[256];
+        ov_snprintf_char(info,
+                         sizeof(info),
+                         "%1$hs",
+                         pgettext(".ptk.anm2 OverwriteSelector", "PSD Layer Selector for %1$hs"),
+                         filename);
+        if (!ov_sprintf_append_char(content, err, "%1$hs", "--information:%1$hs\n", info)) {
+          OV_ERROR_ADD_TRACE(err);
+          goto cleanup;
+        }
+      }
+    }
+  }
+
   // --value@id: line with default character ID
   {
     char const *const char_id = doc->default_character_id ? doc->default_character_id : "";
