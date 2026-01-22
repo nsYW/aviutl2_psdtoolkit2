@@ -67,6 +67,7 @@ func main() {
 	g.SendEditingImageState = ipcm.SendEditingImageState
 	g.ExportFaviewSlider = ipcm.ExportFaviewSlider
 	g.ExportLayerNames = ipcm.ExportLayerNames
+	g.RenderScaled = ipcm.RenderScaled
 	g.DropFiles = func(filenames []string) {
 		if err := g.AddFile(extractPSDAndPFV(filenames), 0); err != nil {
 			g.ReportError(err)

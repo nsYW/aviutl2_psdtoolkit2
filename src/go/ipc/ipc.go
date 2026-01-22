@@ -22,13 +22,14 @@ import (
 )
 
 type cacheKey struct {
-	Width   int
-	Height  int
-	OffsetX int
-	OffsetY int
-	Scale   float32
-	Path    string
-	State   string
+	Width        int
+	Height       int
+	OffsetX      int
+	OffsetY      int
+	Scale        float32
+	ScaleQuality img.ScaleQuality
+	Path         string
+	State        string
 }
 
 func (k *cacheKey) Hash() uint64 {
@@ -49,6 +50,9 @@ func (k *cacheKey) Hash() uint64 {
 		panic(err)
 	}
 	if err := binary.Write(h, binary.LittleEndian, math.Float32bits(k.Scale)); err != nil {
+		panic(err)
+	}
+	if err := binary.Write(h, binary.LittleEndian, int32(k.ScaleQuality)); err != nil {
 		panic(err)
 	}
 	if _, err := io.WriteString(h, k.State); err != nil {
@@ -104,13 +108,14 @@ func (ipc *IPC) draw(id int, filePath string, width, height int) ([]byte, error)
 	}
 
 	ckey := cacheKey{
-		Width:   width,
-		Height:  height,
-		OffsetX: img.OffsetX,
-		OffsetY: img.OffsetY,
-		Scale:   img.Scale,
-		Path:    filePath,
-		State:   state,
+		Width:        width,
+		Height:       height,
+		OffsetX:      img.OffsetX,
+		OffsetY:      img.OffsetY,
+		Scale:        img.Scale,
+		ScaleQuality: img.ScaleQuality,
+		Path:         filePath,
+		State:        state,
 	}
 	if cv, ok := ipc.cache[ckey]; ok {
 		cv.LastAccess = time.Now()
@@ -148,20 +153,20 @@ func (ipc *IPC) getLayerNames(id int, filePath string) (string, error) {
 	return strings.Join(s, "\n"), nil
 }
 
-func (ipc *IPC) setProps(id int, filePath string, tag *int, layer *string, scale *float32, offsetX, offsetY *int) (bool, uint64, int, int, error) {
-	img, err := ipc.tmpImg.Load(id, filePath)
+func (ipc *IPC) setProps(id int, filePath string, tag *int, layer *string, scale *float32, scaleQuality *img.ScaleQuality, offsetX, offsetY *int) (bool, uint64, int, int, error) {
+	im, err := ipc.tmpImg.Load(id, filePath)
 	if err != nil {
 		return false, 0, 0, 0, errors.Wrap(err, "ipc: could not load")
 	}
-	modified := img.Modified
+	modified := im.Modified
 	if layer != nil {
 		if *layer != "" {
-			l := *img.InitialLayerState + " " + *layer
+			l := *im.InitialLayerState + " " + *layer
 			layer = &l
 		} else {
-			layer = img.InitialLayerState
+			layer = im.InitialLayerState
 		}
-		b, err := img.Deserialize(*layer)
+		b, err := im.Deserialize(*layer)
 		if err != nil {
 			return false, 0, 0, 0, errors.Wrap(err, "ipc: deserialize failed")
 		}
@@ -175,27 +180,33 @@ func (ipc *IPC) setProps(id int, filePath string, tag *int, layer *string, scale
 		} else if *scale < 0.00001 {
 			*scale = 0.00001
 		}
-		if *scale != img.Scale {
-			img.Scale = *scale
+		if *scale != im.Scale {
+			im.Scale = *scale
+			modified = true
+		}
+	}
+	if scaleQuality != nil {
+		if *scaleQuality != im.ScaleQuality {
+			im.ScaleQuality = *scaleQuality
 			modified = true
 		}
 	}
 	if offsetX != nil {
-		if *offsetX != img.OffsetX {
-			img.OffsetX = *offsetX
+		if *offsetX != im.OffsetX {
+			im.OffsetX = *offsetX
 			modified = true
 		}
 	}
 	if offsetY != nil {
-		if *offsetY != img.OffsetY {
-			img.OffsetY = *offsetY
+		if *offsetY != im.OffsetY {
+			im.OffsetY = *offsetY
 			modified = true
 		}
 	}
-	r := img.ScaledCanvasRect()
-	img.Modified = modified
+	r := im.ScaledCanvasRect()
+	im.Modified = modified
 
-	state, err := img.Serialize()
+	state, err := im.Serialize()
 	if err != nil {
 		return false, 0, 0, 0, errors.Wrap(err, "ipc: could not serialize state")
 	}
@@ -207,13 +218,14 @@ func (ipc *IPC) setProps(id int, filePath string, tag *int, layer *string, scale
 	}
 
 	ckey := (&cacheKey{
-		Width:   r.Dx(),
-		Height:  r.Dy(),
-		OffsetX: img.OffsetX,
-		OffsetY: img.OffsetY,
-		Scale:   img.Scale,
-		Path:    filePath,
-		State:   state,
+		Width:        r.Dx(),
+		Height:       r.Dy(),
+		OffsetX:      im.OffsetX,
+		OffsetY:      im.OffsetY,
+		Scale:        im.Scale,
+		ScaleQuality: im.ScaleQuality,
+		Path:         filePath,
+		State:        state,
 	}).Hash()
 
 	return modified, ckey, r.Dx(), r.Dy(), nil
@@ -391,10 +403,12 @@ func (ipc *IPC) dispatch(cmd string) error {
 			propOffsetX
 			propOffsetY
 			propTag
+			propScaleQuality
 		)
 		var tag *int
 		var layer *string
 		var scale *float32
+		var scaleQuality *img.ScaleQuality
 		var offsetX, offsetY *int
 	readProps:
 		for {
@@ -426,6 +440,14 @@ func (ipc *IPC) dispatch(cmd string) error {
 				}
 				scale = &f
 				ods.ODS("  Scale: %f", f)
+			case propScaleQuality:
+				i, err := readInt32()
+				if err != nil {
+					return err
+				}
+				q := img.ScaleQuality(i)
+				scaleQuality = &q
+				ods.ODS("  ScaleQuality: %d", i)
 			case propOffsetX:
 				i, err := readInt32()
 				if err != nil {
@@ -442,7 +464,7 @@ func (ipc *IPC) dispatch(cmd string) error {
 				ods.ODS("  OffsetY: %d", i)
 			}
 		}
-		modified, ckey, width, height, err := ipc.setProps(id, filePath, tag, layer, scale, offsetX, offsetY)
+		modified, ckey, width, height, err := ipc.setProps(id, filePath, tag, layer, scale, scaleQuality, offsetX, offsetY)
 		if err != nil {
 			return err
 		}
@@ -597,4 +619,28 @@ func New(srcs *source.Sources) *IPC {
 		replyDone: make(chan struct{}),
 	}
 	return r
+}
+
+// RenderScaled renders an image at a specific scale with the given quality.
+// This method is safe to call from any goroutine as it uses the IPC queue for serialization.
+func (ipc *IPC) RenderScaled(ctx context.Context, im *img.Image, scale float64, quality img.ScaleQuality) (*image.NRGBA, error) {
+	var result *image.NRGBA
+	var err error
+
+	done := make(chan struct{})
+	select {
+	case ipc.queue <- func() {
+		result, err = im.RenderWithScale(ctx, scale, quality)
+		close(done)
+	}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	select {
+	case <-done:
+		return result, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

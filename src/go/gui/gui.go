@@ -3,6 +3,7 @@ package gui
 import (
 	"bytes"
 	"context"
+	"image"
 	"image/png"
 	"time"
 
@@ -79,6 +80,10 @@ type GUI struct {
 	ExportFaviewSlider    func(path, sliderName string, names, values []string, selectedIndex int) error
 	ExportLayerNames      func(path string, names, values []string, selectedIndex int) error
 	DropFiles             func(filenames []string)
+
+	// RenderScaled renders an image at a specific scale with the given quality.
+	// This is set by main.go to route through IPC for thread-safe access.
+	RenderScaled func(ctx context.Context, im *img.Image, scale float64, quality img.ScaleQuality) (*image.NRGBA, error)
 }
 
 // New creates a new GUI instance.
@@ -127,10 +132,10 @@ func (g *GUI) onSnapshotChange() {
 		g.lastSelectedImg = currentImg
 		g.lastSelectedIndex = g.snapshot.SelectedIndex
 		g.lastViewState = nil // Reset cache for new image
-		g.changeSelectedImage()
 
-		// Restore view state of new image
+		// Restore view state BEFORE changing image so pendingViewState is set
 		g.restoreViewState()
+		g.changeSelectedImage()
 	}
 }
 
@@ -248,6 +253,16 @@ func (g *GUI) Init(caption string, bgImg, symbolFont []byte) error {
 		// Only update canvas cursor if splitter is not active
 		if !g.splitterCursorActive {
 			g.window.SetCursor(cursor)
+		}
+	})
+	// Wire the RenderScaled callback to mainView for unified render path
+	if g.RenderScaled != nil {
+		g.mainView.SetRenderScaled(g.RenderScaled)
+	}
+	// Set up thumbnail update callback
+	g.mainView.SetOnImageRendered(func(nrgba *image.NRGBA) {
+		if g.thumbnailer != nil {
+			g.thumbnailer.Update(nrgba)
 		}
 	})
 	close(g.ready)

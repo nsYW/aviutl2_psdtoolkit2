@@ -1,37 +1,16 @@
 package gui
 
 import (
-	"context"
-	"time"
-
 	"psdtoolkit/img"
-	"psdtoolkit/ods"
 )
 
-func updateRenderedImage(g *GUI, img *img.Image) {
+func updateRenderedImage(g *GUI, im *img.Image) {
 	if g.cancelRender != nil {
 		g.cancelRender()
+		g.cancelRender = nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	g.cancelRender = cancel
-	go func() {
-		s := time.Now().UnixNano()
-		nrgba, err := img.Render(ctx)
-		if err != nil {
-			ods.ODS("rendering: aborted: %v", err)
-			return
-		}
-		ods.ODS("rendering: %dms", (time.Now().UnixNano()-s)/1e6)
-		if err = g.do(func() error {
-			g.mainView.SetRenderedImage(nrgba)
-			if g.thumbnailer != nil {
-				g.thumbnailer.Update(nrgba)
-			}
-			cancel()
-			return nil
-		}); err != nil {
-			ods.ODS("gui: failed to update rendered image: %v", err)
-		}
-	}()
+	// Use the new SetImage which routes through RenderScaled callback
+	// Thumbnail update is handled via onImageRendered callback set in Init
+	g.mainView.SetImage(im)
 }

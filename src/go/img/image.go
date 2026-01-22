@@ -22,6 +22,16 @@ const (
 	FlipXY
 )
 
+// ScaleQuality represents the quality of image downscaling
+type ScaleQuality int
+
+const (
+	// ScaleQualityFast uses nearest neighbor for fast but lower quality downscaling
+	ScaleQualityFast ScaleQuality = iota
+	// ScaleQualityBeautiful uses gamma-corrected area averaging for high quality downscaling
+	ScaleQualityBeautiful
+)
+
 type Toucher interface {
 	Touch()
 	LastAccess() time.Time
@@ -40,9 +50,15 @@ type Image struct {
 
 	Modified bool
 
-	Scale   float32
-	OffsetX int
-	OffsetY int
+	Scale        float32
+	ScaleQuality ScaleQuality
+	OffsetX      int
+	OffsetY      int
+
+	// scaledImages caches downscaled images by quality
+	// Key is ScaleQuality, value is the downscaled image at img.Scale
+	scaledImages map[ScaleQuality]*image.NRGBA
+	scaledScale  float32 // The scale value when scaledImages was generated
 
 	PFV *PFV
 }
@@ -112,25 +128,75 @@ func (img *Image) ScaledCanvasRect() image.Rectangle {
 }
 
 func (img *Image) Render(ctx context.Context) (*image.NRGBA, error) {
+	return img.RenderWithScale(ctx, float64(img.Scale), img.ScaleQuality)
+}
+
+// RenderWithScale renders the image at a specific scale with the given quality.
+// This is the main rendering entry point that handles both PSD rendering and downscaling.
+func (img *Image) RenderWithScale(ctx context.Context, scale float64, quality ScaleQuality) (*image.NRGBA, error) {
 	var err error
 	if img.image == nil {
 		img.image = image.NewNRGBA(img.PSD.CanvasRect)
 		err = img.PSD.Renderer.Render(ctx, img.image)
+		// Clear scaled cache on initial render
+		img.scaledImages = nil
 	} else {
 		err = img.PSD.Renderer.RenderDiff(ctx, img.image)
+		// TODO: Phase 2 will add differential downscaling here
+		// For now, invalidate entire scaled cache on any change
+		img.scaledImages = nil
 	}
 	if err != nil {
 		return nil, errors.Wrap(err, "img: render failed")
 	}
 	img.Modified = false
+
 	nrgba := img.image
-	if img.Scale < 1 {
-		tmp := image.NewNRGBA(img.ScaledCanvasRect())
-		if err = downscale.NRGBAGamma(ctx, tmp, nrgba, 2.2); err != nil {
-			return nil, errors.Wrap(err, "img: downscale failed")
+
+	// Handle downscaling if scale < 1
+	if scale < 1 {
+		// Calculate scaled rect
+		r := img.PSD.CanvasRect
+		r.Max.X = r.Min.X + int(float64(r.Dx())*scale+0.5)
+		r.Max.Y = r.Min.Y + int(float64(r.Dy())*scale+0.5)
+		if r.Dx() < 1 {
+			r.Max.X = r.Min.X + 1
 		}
-		nrgba = tmp
+		if r.Dy() < 1 {
+			r.Max.Y = r.Min.Y + 1
+		}
+
+		// Check if we need to reset cache (scale changed)
+		if img.scaledScale != float32(scale) {
+			img.scaledImages = nil
+			img.scaledScale = float32(scale)
+		}
+
+		// Check cache
+		if img.scaledImages == nil {
+			img.scaledImages = make(map[ScaleQuality]*image.NRGBA)
+		}
+		if cached, ok := img.scaledImages[quality]; ok {
+			nrgba = cached
+		} else {
+			// Perform downscaling
+			tmp := image.NewNRGBA(r)
+			switch quality {
+			case ScaleQualityFast:
+				if err = downscale.NRGBAFast(ctx, tmp, img.image); err != nil {
+					return nil, errors.Wrap(err, "img: downscale failed")
+				}
+			case ScaleQualityBeautiful:
+				if err = downscale.NRGBAGamma(ctx, tmp, img.image, 2.2); err != nil {
+					return nil, errors.Wrap(err, "img: downscale failed")
+				}
+			}
+			img.scaledImages[quality] = tmp
+			nrgba = tmp
+		}
 	}
+
+	// Apply flip
 	f := img.Layers.Flip
 	if f != FlipNone {
 		tmp := image.NewNRGBA(nrgba.Rect)
