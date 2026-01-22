@@ -80,11 +80,12 @@ void ptk_script_module_destroy(struct ptk_script_module **const sm) {
   OV_FREE(sm);
 }
 
-void ptk_script_module_get_debug_mode(struct ptk_script_module *const sm,
-                                      struct aviutl2_script_module_param *const param,
-                                      int const cache_index) {
+void ptk_script_module_get_render_config(struct ptk_script_module *const sm,
+                                         struct aviutl2_script_module_param *const param,
+                                         int const cache_index) {
   struct ov_error err = {0};
   bool debug_mode = false;
+  int resize_quality = 0;
   bool success = false;
 
   if (!sm || !param) {
@@ -92,25 +93,27 @@ void ptk_script_module_get_debug_mode(struct ptk_script_module *const sm,
     goto cleanup;
   }
 
-  if (!sm->callbacks.get_debug_mode) {
+  if (!sm->callbacks.get_render_config) {
     OV_ERROR_SET_GENERIC(&err, ov_error_generic_not_implemented_yet);
     goto cleanup;
   }
 
-  if (!sm->callbacks.get_debug_mode(sm->callbacks.userdata, &debug_mode, &err)) {
+  if (!sm->callbacks.get_render_config(sm->callbacks.userdata, &debug_mode, &resize_quality, &err)) {
     OV_ERROR_ADD_TRACE(&err);
     goto cleanup;
   }
 
   param->push_result_boolean(debug_mode);
   param->push_result_int(cache_index);
+  param->push_result_int(resize_quality);
   success = true;
 
 cleanup:
   if (!success) {
     param->push_result_boolean(false);
     param->push_result_int(cache_index);
-    ptk_logf_error(&err, "%1$hs", "%1$hs", gettext("failed to get debug mode."));
+    param->push_result_int(0);
+    ptk_logf_error(&err, "%1$hs", "%1$hs", gettext("failed to get render config."));
     OV_ERROR_DESTROY(&err);
   }
 }
@@ -187,6 +190,7 @@ void ptk_script_module_set_props(struct ptk_script_module *const sm, struct aviu
         .offset_x = param->get_param_table_int(2, "offsetx"),
         .offset_y = param->get_param_table_int(2, "offsety"),
         .tag = param->get_param_table_int(2, "tag"),
+        .quality = param->get_param_table_int(2, "quality"),
     };
 
     struct ptk_script_module_set_props_result result = {0};
@@ -199,11 +203,13 @@ void ptk_script_module_set_props(struct ptk_script_module *const sm, struct aviu
     char ckey_hex[17];
     ckey_to_hex(result.ckey, ckey_hex);
 
-    // Return 4 values: modified, cachekey_hex, width, height
+    // Return 6 values: modified, cachekey_hex, width, height, flip_x, flip_y
     param->push_result_boolean(result.modified);
     param->push_result_string(ckey_hex);
     param->push_result_int(result.width);
     param->push_result_int(result.height);
+    param->push_result_boolean(result.flip_x);
+    param->push_result_boolean(result.flip_y);
   }
 
   success = true;
@@ -214,6 +220,8 @@ cleanup:
     param->push_result_string("");
     param->push_result_int(0);
     param->push_result_int(0);
+    param->push_result_boolean(false);
+    param->push_result_boolean(false);
     ptk_logf_error(&err, "%1$hs", "%1$hs", gettext("failed to set PSD properties."));
     OV_ERROR_DESTROY(&err);
   }
@@ -242,6 +250,7 @@ void ptk_script_module_get_drop_config(struct ptk_script_module *const sm,
     }
 
     char const *keys[] = {
+        "debug_mode",
         "manual_shift_wav",
         "manual_shift_psd",
         "manual_wav_txt_pair",
@@ -250,6 +259,7 @@ void ptk_script_module_get_drop_config(struct ptk_script_module *const sm,
         "external_object_audio_text",
     };
     int values[] = {
+        config.debug_mode ? 1 : 0,
         config.manual_shift_wav ? 1 : 0,
         config.manual_shift_psd ? 1 : 0,
         config.manual_wav_txt_pair ? 1 : 0,

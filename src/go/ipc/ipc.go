@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oov/psd/blend"
 	"github.com/pkg/errors"
 
 	"psdtoolkit/img"
@@ -22,13 +21,14 @@ import (
 )
 
 type cacheKey struct {
-	Width   int
-	Height  int
-	OffsetX int
-	OffsetY int
-	Scale   float32
-	Path    string
-	State   string
+	Width        int
+	Height       int
+	OffsetX      int
+	OffsetY      int
+	Scale        float32
+	ScaleQuality img.ScaleQuality
+	Path         string
+	State        string
 }
 
 func (k *cacheKey) Hash() uint64 {
@@ -49,6 +49,9 @@ func (k *cacheKey) Hash() uint64 {
 		panic(err)
 	}
 	if err := binary.Write(h, binary.LittleEndian, math.Float32bits(k.Scale)); err != nil {
+		panic(err)
+	}
+	if err := binary.Write(h, binary.LittleEndian, int32(k.ScaleQuality)); err != nil {
 		panic(err)
 	}
 	if _, err := io.WriteString(h, k.State); err != nil {
@@ -74,6 +77,7 @@ type IPC struct {
 
 	tmpImg temporary.Temporary
 	cache  map[cacheKey]cacheValue
+	shm    *SharedMemory
 
 	queue     chan func()
 	reply     chan error
@@ -93,47 +97,79 @@ func (ipc *IPC) load(id int, filePath string) (*img.Image, error) {
 	return ipc.tmpImg.Load(id, filePath)
 }
 
-func (ipc *IPC) draw(id int, filePath string, width, height int) ([]byte, error) {
+func (ipc *IPC) draw(id int, filePath string, width, height int, shmResized bool) (dataLen int, err error) {
+	if ipc.shm == nil {
+		return 0, errors.New("ipc: shared memory not available")
+	}
+
+	dataLen = width * height * 4
+
+	// Ensure shared memory is opened (reopen if C side resized it)
+	if err = ipc.shm.EnsureOpen(shmResized); err != nil {
+		return 0, errors.Wrap(err, "ipc: could not open shared memory")
+	}
+
 	img, err := ipc.tmpImg.Load(id, filePath)
 	if err != nil {
-		return nil, errors.Wrap(err, "ipc: could not load")
+		return 0, errors.Wrap(err, "ipc: could not load")
 	}
 	state, err := img.Serialize()
 	if err != nil {
-		return nil, errors.Wrap(err, "ipc: could not serialize state")
+		return 0, errors.Wrap(err, "ipc: could not serialize state")
 	}
 
 	ckey := cacheKey{
-		Width:   width,
-		Height:  height,
-		OffsetX: img.OffsetX,
-		OffsetY: img.OffsetY,
-		Scale:   img.Scale,
-		Path:    filePath,
-		State:   state,
+		Width:        width,
+		Height:       height,
+		OffsetX:      img.OffsetX,
+		OffsetY:      img.OffsetY,
+		Scale:        img.Scale,
+		ScaleQuality: img.ScaleQuality,
+		Path:         filePath,
+		State:        state,
 	}
+
+	// Check if we have cached data
 	if cv, ok := ipc.cache[ckey]; ok {
 		cv.LastAccess = time.Now()
 		ipc.cache[ckey] = cv
 		ipc.tmpImg.Srcs.Logger.Println("cached")
-		img.Modified = false // Reset Modified flag since we're returning cached data
-		return cv.Data, nil
+		img.Modified = false
+		// Copy cached data to shared memory (sequential copy)
+		copy(ipc.shm.GetBuffer(dataLen), cv.Data)
+		return dataLen, nil
 	}
 
-	startAt := time.Now().UnixNano()
-	nrgba, err := img.Render(context.Background())
+	// Use RenderWithScale for differential rendering support.
+	// applyFlip=false: flip is NOT applied here - it will be done on GPU side
+	// via AviUtl's flip filter (obj.effect("反転")) for better performance.
+	// The flip info is sent to Lua via set_props, and Lua applies the flip filter.
+	// See copyWithOffsetBGRA() for details on how offset is adjusted for GPU flip.
+	nrgba, err := img.RenderWithScale(context.Background(), float64(img.Scale), img.ScaleQuality, false)
 	if err != nil {
-		return nil, errors.Wrap(err, "ipc: could not render")
+		return 0, errors.Wrap(err, "ipc: could not render")
 	}
+
+	offsetX := int(float32(-img.OffsetX) * img.Scale)
+	offsetY := int(float32(-img.OffsetY) * img.Scale)
+	flipX := img.FlipX()
+	flipY := img.FlipY()
+
+	// First write to regular memory (random access is fast)
+	// copyWithOffsetBGRA handles offset inversion for GPU-side flip
 	ret := image.NewNRGBA(image.Rect(0, 0, width, height))
-	blend.Copy.Draw(ret, ret.Rect, nrgba, image.Pt(int(float32(-img.OffsetX)*img.Scale), int(float32(-img.OffsetY)*img.Scale)))
-	nrgbaToNBGRA(ret.Pix)
+	copyWithOffsetBGRA(ret, nrgba, offsetX, offsetY, flipX, flipY)
+
+	// Then copy to shared memory (sequential copy is faster than random access)
+	copy(ipc.shm.GetBuffer(dataLen), ret.Pix)
+
+	// Cache the data
 	ipc.cache[ckey] = cacheValue{
 		LastAccess: time.Now(),
 		Data:       ret.Pix,
 	}
-	ipc.tmpImg.Srcs.Logger.Println(fmt.Sprintf("render: %dms", (time.Now().UnixNano()-startAt)/1e6))
-	return ret.Pix, nil
+
+	return dataLen, nil
 }
 
 func (ipc *IPC) getLayerNames(id int, filePath string) (string, error) {
@@ -148,22 +184,22 @@ func (ipc *IPC) getLayerNames(id int, filePath string) (string, error) {
 	return strings.Join(s, "\n"), nil
 }
 
-func (ipc *IPC) setProps(id int, filePath string, tag *int, layer *string, scale *float32, offsetX, offsetY *int) (bool, uint64, int, int, error) {
-	img, err := ipc.tmpImg.Load(id, filePath)
+func (ipc *IPC) setProps(id int, filePath string, tag *int, layer *string, scale *float32, scaleQuality *img.ScaleQuality, offsetX, offsetY *int) (bool, uint64, int, int, bool, bool, error) {
+	im, err := ipc.tmpImg.Load(id, filePath)
 	if err != nil {
-		return false, 0, 0, 0, errors.Wrap(err, "ipc: could not load")
+		return false, 0, 0, 0, false, false, errors.Wrap(err, "ipc: could not load")
 	}
-	modified := img.Modified
+	modified := im.Modified
 	if layer != nil {
 		if *layer != "" {
-			l := *img.InitialLayerState + " " + *layer
+			l := *im.InitialLayerState + " " + *layer
 			layer = &l
 		} else {
-			layer = img.InitialLayerState
+			layer = im.InitialLayerState
 		}
-		b, err := img.Deserialize(*layer)
+		b, err := im.Deserialize(*layer)
 		if err != nil {
-			return false, 0, 0, 0, errors.Wrap(err, "ipc: deserialize failed")
+			return false, 0, 0, 0, false, false, errors.Wrap(err, "ipc: deserialize failed")
 		}
 		if b {
 			modified = true
@@ -175,29 +211,35 @@ func (ipc *IPC) setProps(id int, filePath string, tag *int, layer *string, scale
 		} else if *scale < 0.00001 {
 			*scale = 0.00001
 		}
-		if *scale != img.Scale {
-			img.Scale = *scale
+		if *scale != im.Scale {
+			im.Scale = *scale
+			modified = true
+		}
+	}
+	if scaleQuality != nil {
+		if *scaleQuality != im.ScaleQuality {
+			im.ScaleQuality = *scaleQuality
 			modified = true
 		}
 	}
 	if offsetX != nil {
-		if *offsetX != img.OffsetX {
-			img.OffsetX = *offsetX
+		if *offsetX != im.OffsetX {
+			im.OffsetX = *offsetX
 			modified = true
 		}
 	}
 	if offsetY != nil {
-		if *offsetY != img.OffsetY {
-			img.OffsetY = *offsetY
+		if *offsetY != im.OffsetY {
+			im.OffsetY = *offsetY
 			modified = true
 		}
 	}
-	r := img.ScaledCanvasRect()
-	img.Modified = modified
+	r := im.ScaledCanvasRect()
+	im.Modified = modified
 
-	state, err := img.Serialize()
+	state, err := im.Serialize()
 	if err != nil {
-		return false, 0, 0, 0, errors.Wrap(err, "ipc: could not serialize state")
+		return false, 0, 0, 0, false, false, errors.Wrap(err, "ipc: could not serialize state")
 	}
 
 	if tag != nil && *tag != 0 {
@@ -207,16 +249,19 @@ func (ipc *IPC) setProps(id int, filePath string, tag *int, layer *string, scale
 	}
 
 	ckey := (&cacheKey{
-		Width:   r.Dx(),
-		Height:  r.Dy(),
-		OffsetX: img.OffsetX,
-		OffsetY: img.OffsetY,
-		Scale:   img.Scale,
-		Path:    filePath,
-		State:   state,
+		Width:        r.Dx(),
+		Height:       r.Dy(),
+		OffsetX:      im.OffsetX,
+		OffsetY:      im.OffsetY,
+		Scale:        im.Scale,
+		ScaleQuality: im.ScaleQuality,
+		Path:         filePath,
+		State:        state,
 	}).Hash()
 
-	return modified, ckey, r.Dx(), r.Dy(), nil
+	flipX := im.FlipX()
+	flipY := im.FlipY()
+	return modified, ckey, r.Dx(), r.Dy(), flipX, flipY, nil
 }
 
 func (ipc *IPC) SendEditingImageState(filePath, state string) error {
@@ -355,15 +400,25 @@ func (ipc *IPC) dispatch(cmd string) error {
 		if err != nil {
 			return err
 		}
-		ods.ODS("  Width: %d / Height: %d", width, height)
-		b, err := ipc.draw(id, filePath, width, height)
+		shmResizedInt, err := readInt32()
 		if err != nil {
 			return err
 		}
+		shmResized := shmResizedInt != 0
+		ods.ODS("  Width: %d / Height: %d / ShmResized: %v", width, height, shmResized)
+		dataLen, err := ipc.draw(id, filePath, width, height, shmResized)
+		if err != nil {
+			return err
+		}
+		// Write reply: success flag, data length
 		if err = writeUint32(0x80000000); err != nil {
 			return err
 		}
-		return writeBinary(b)
+		if err = writeInt32(int32(dataLen)); err != nil {
+			return err
+		}
+		ods.ODS("  -> SharedMem(Len: %d)", dataLen)
+		return nil
 
 	case "LNAM":
 		id, filePath, err := readIDAndFilePath()
@@ -391,10 +446,12 @@ func (ipc *IPC) dispatch(cmd string) error {
 			propOffsetX
 			propOffsetY
 			propTag
+			propScaleQuality
 		)
 		var tag *int
 		var layer *string
 		var scale *float32
+		var scaleQuality *img.ScaleQuality
 		var offsetX, offsetY *int
 	readProps:
 		for {
@@ -426,6 +483,14 @@ func (ipc *IPC) dispatch(cmd string) error {
 				}
 				scale = &f
 				ods.ODS("  Scale: %f", f)
+			case propScaleQuality:
+				i, err := readInt32()
+				if err != nil {
+					return err
+				}
+				q := img.ScaleQuality(i)
+				scaleQuality = &q
+				ods.ODS("  ScaleQuality: %d", i)
 			case propOffsetX:
 				i, err := readInt32()
 				if err != nil {
@@ -442,7 +507,7 @@ func (ipc *IPC) dispatch(cmd string) error {
 				ods.ODS("  OffsetY: %d", i)
 			}
 		}
-		modified, ckey, width, height, err := ipc.setProps(id, filePath, tag, layer, scale, offsetX, offsetY)
+		modified, ckey, width, height, flipX, flipY, err := ipc.setProps(id, filePath, tag, layer, scale, scaleQuality, offsetX, offsetY)
 		if err != nil {
 			return err
 		}
@@ -459,7 +524,13 @@ func (ipc *IPC) dispatch(cmd string) error {
 		if err = writeUint32(uint32(width)); err != nil {
 			return err
 		}
-		return writeUint32(uint32(height))
+		if err = writeUint32(uint32(height)); err != nil {
+			return err
+		}
+		if err = writeBool(flipX); err != nil {
+			return err
+		}
+		return writeBool(flipY)
 
 	case "GWND":
 		h, err := ipc.GetWindowHandle()
@@ -588,13 +659,42 @@ func (ipc *IPC) Main(exitCh chan<- struct{}) {
 }
 
 func New(srcs *source.Sources) *IPC {
+	// Get parent process PID (C side) for shared memory name
+	cPID := GetParentPID()
+	shm := NewSharedMemory(cPID)
+
 	r := &IPC{
 		tmpImg: temporary.Temporary{Srcs: srcs},
 		cache:  map[cacheKey]cacheValue{},
+		shm:    shm,
 
 		queue:     make(chan func()),
 		reply:     make(chan error),
 		replyDone: make(chan struct{}),
 	}
 	return r
+}
+
+// RenderScaled renders an image at a specific scale with the given quality.
+// This method is safe to call from any goroutine as it uses the IPC queue for serialization.
+func (ipc *IPC) RenderScaled(ctx context.Context, im *img.Image, scale float64, quality img.ScaleQuality) (*image.NRGBA, error) {
+	var result *image.NRGBA
+	var err error
+
+	done := make(chan struct{})
+	select {
+	case ipc.queue <- func() {
+		result, err = im.RenderWithScale(ctx, scale, quality, true)
+		close(done)
+	}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	select {
+	case <-done:
+		return result, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

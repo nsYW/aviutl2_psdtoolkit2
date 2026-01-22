@@ -3,9 +3,12 @@ package ipc
 import (
 	"encoding/binary"
 	"errors"
+	"image"
 	"io"
 	"math"
 	"os"
+	"runtime"
+	"sync"
 
 	"psdtoolkit/ods"
 )
@@ -16,6 +19,82 @@ func nrgbaToNBGRA(p []byte) {
 			p[i+2], p[i+0] = p[i+0], p[i+2]
 		}
 	}
+}
+
+// copyWithOffsetBGRA copies src to dst with offset and NRGBA->NBGRA conversion in a single pass.
+//
+// GPU-side Flip Optimization:
+// Flip processing is NOT done here - it's delegated to AviUtl's GPU-based flip filter
+// (obj.effect("反転")) which runs on the GPU with essentially zero CPU cost.
+// This eliminates the CPU overhead of pixel-by-pixel flip operations for large images.
+//
+// Offset Inversion for Flip:
+// When flipX or flipY is enabled, the offset sign is inverted. This is because:
+//   - Without flip: offset is applied first, then the image is displayed as-is
+//   - With GPU flip: the image is flipped AFTER being positioned, so we need to
+//     pre-invert the offset so that flip(offset(image)) == offset(flip(image))
+//
+// Example: if flipY is on and offsetY is +100, we use -100 so the final position
+// after GPU flip matches what it would be if we did CPU flip with +100 offset.
+//
+// Uses parallel processing for performance.
+func copyWithOffsetBGRA(dst, src *image.NRGBA, offsetX, offsetY int, flipX, flipY bool) {
+	dstW, dstH := dst.Rect.Dx(), dst.Rect.Dy()
+	srcW, srcH := src.Rect.Dx(), src.Rect.Dy()
+
+	// Invert offset for flipped axes to maintain correct positioning after GPU flip
+	// (see function comment for detailed explanation)
+	if flipX {
+		offsetX = -offsetX
+	}
+	if flipY {
+		offsetY = -offsetY
+	}
+
+	numWorkers := runtime.NumCPU()
+	rowsPerWorker := (dstH + numWorkers - 1) / numWorkers
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		startY := w * rowsPerWorker
+		endY := startY + rowsPerWorker
+		if endY > dstH {
+			endY = dstH
+		}
+		if startY >= dstH {
+			break
+		}
+
+		wg.Add(1)
+		go func(startY, endY int) {
+			defer wg.Done()
+			for dy := startY; dy < endY; dy++ {
+				dstRowStart := (dy-dst.Rect.Min.Y)*dst.Stride - dst.Rect.Min.X*4
+				for dx := 0; dx < dstW; dx++ {
+					// Calculate source coordinates with offset
+					sx := dx - offsetX
+					sy := dy - offsetY
+
+					// Bounds check
+					if sx < 0 || sx >= srcW || sy < 0 || sy >= srcH {
+						continue // Leave dst pixel as zero (transparent)
+					}
+
+					srcIdx := (sy-src.Rect.Min.Y)*src.Stride + (sx-src.Rect.Min.X)*4
+					dstIdx := dstRowStart + dx*4
+
+					// Copy with RGBA -> BGRA swap (only if alpha > 0)
+					if src.Pix[srcIdx+3] > 0 {
+						dst.Pix[dstIdx+0] = src.Pix[srcIdx+2] // B <- R
+						dst.Pix[dstIdx+1] = src.Pix[srcIdx+1] // G <- G
+						dst.Pix[dstIdx+2] = src.Pix[srcIdx+0] // R <- B
+						dst.Pix[dstIdx+3] = src.Pix[srcIdx+3] // A <- A
+					}
+				}
+			}
+		}(startY, endY)
+	}
+	wg.Wait()
 }
 
 func readIDAndFilePath() (int, string, error) {

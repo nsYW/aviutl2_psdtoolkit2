@@ -81,3 +81,13 @@ bool ptk_config_set_external_object_audio_text(struct ptk_config *const config,
 
 bool ptk_config_get_debug_mode(struct ptk_config const *const config, bool *const value, struct ov_error *const err);
 bool ptk_config_set_debug_mode(struct ptk_config *const config, bool const value, struct ov_error *const err);
+
+// Resize quality setting - must match Go ScaleQuality enum in img/image.go
+
+enum ptk_resize_quality {
+  ptk_resize_quality_beautiful = 0,
+  ptk_resize_quality_fast = 1,
+};
+
+bool ptk_config_get_resize_quality(struct ptk_config const *const config, int *const value, struct ov_error *const err);
+bool ptk_config_set_resize_quality(struct ptk_config *const config, int const value, struct ov_error *const err);

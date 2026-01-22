@@ -1,4 +1,5 @@
 --- PSD object for PSDToolKit %VERSION% by oov
+local config = require("PSDToolKit.config")
 local debug = require("PSDToolKit.debug")
 local dbg = debug.dbg
 
@@ -135,24 +136,31 @@ function PSD:draw(obj)
 	-- Build layer state string
 	local layer_str = self:buildlayer(obj)
 
-	-- Call set_props to get cache key and dimensions
+	-- Get resize quality from config
+	local quality = config.get().resize_quality
+
+	-- Call set_props to get cache key, dimensions, and flip flags
 	-- modified: indicates whether properties (layer, scale, offset) changed since last call.
 	--           This does NOT indicate cache existence. Even if modified=false, cache may not exist
 	--           (e.g., after state changes A->B->A, modified=false but cache for A may be evicted).
-	local modified, cachekey_hex, width, height = ptk.set_props(self.id, self.file, {
+	-- flip_x, flip_y: flip flags for GPU-side flip processing
+	local modified, cachekey_hex, width, height, flip_x, flip_y = ptk.set_props(self.id, self.file, {
 		tag = self.tag,
 		layer = layer_str,
 		scale = self.scale,
 		offsetx = self.offsetx,
 		offsety = self.offsety,
+		quality = quality,
 	})
 	dbg(
-		"PSD:draw: id=%s modified=%s cachekey=%s size=%sx%s",
+		"PSD:draw: id=%s modified=%s cachekey=%s size=%sx%s flip=%s,%s",
 		tostring(self.id),
 		tostring(modified),
 		tostring(cachekey_hex),
 		tostring(width),
-		tostring(height)
+		tostring(height),
+		tostring(flip_x),
+		tostring(flip_y)
 	)
 
 	local mw, mh = obj.getinfo("image_max")
@@ -187,6 +195,12 @@ function PSD:draw(obj)
 	if obj.w == 0 or obj.h == 0 then
 		error("failed to load cached image")
 	end
+
+	-- Apply GPU-side flip if needed
+	if flip_x or flip_y then
+		obj.effect("反転", "上下反転", flip_y and 1 or 0, "左右反転", flip_x and 1 or 0)
+	end
+
 	return true
 end
 

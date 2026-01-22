@@ -28,11 +28,13 @@ enum {
   id_check_external_wav_txt_pair = 131,
   id_check_external_object_audio_text = 132,
 
-  id_group_psd_drop = 140,
+  id_group_psd_file = 140,
   id_check_manual_shift_psd = 141,
+  id_label_resize_quality = 150,
+  id_combo_resize_quality = 151,
 
-  id_group_debug = 150,
-  id_check_debug_mode = 151,
+  id_group_debug = 160,
+  id_check_debug_mode = 161,
 };
 
 static NATIVE_CHAR const g_config_dialog_prop_name[] = L"PTKConfigDialogData";
@@ -294,9 +296,9 @@ static INT_PTR init_dialog(HWND dialog, struct dialog_data *data) {
                     pgettext("config", "When dropping *.object containing only a&udio and text on the same frame"));
   SetWindowTextW(GetDlgItem(dialog, id_check_external_object_audio_text), buf);
 
-  // PSD File Drop group
-  ov_snprintf_wchar(buf, sizeof(buf) / sizeof(WCHAR), ph, ph, pgettext("config", "PSD File Drop"));
-  SetWindowTextW(GetDlgItem(dialog, id_group_psd_drop), buf);
+  // PSD File group
+  ov_snprintf_wchar(buf, sizeof(buf) / sizeof(WCHAR), ph, ph, pgettext("config", "PSD File"));
+  SetWindowTextW(GetDlgItem(dialog, id_group_psd_file), buf);
 
   ov_snprintf_wchar(
       buf,
@@ -305,6 +307,18 @@ static INT_PTR init_dialog(HWND dialog, struct dialog_data *data) {
       ph,
       pgettext("config", "Only create PSD file object when dropping *.&psd/*.psb file while holding Shift key"));
   SetWindowTextW(GetDlgItem(dialog, id_check_manual_shift_psd), buf);
+
+  ov_snprintf_wchar(buf, sizeof(buf) / sizeof(WCHAR), ph, ph, pgettext("config", "Resize Quality:"));
+  SetWindowTextW(GetDlgItem(dialog, id_label_resize_quality), buf);
+
+  // Populate resize quality combo box
+  {
+    HWND combo = GetDlgItem(dialog, id_combo_resize_quality);
+    ov_snprintf_wchar(buf, sizeof(buf) / sizeof(WCHAR), ph, ph, pgettext("config", "Beautiful"));
+    SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)buf);
+    ov_snprintf_wchar(buf, sizeof(buf) / sizeof(WCHAR), ph, ph, pgettext("config", "Fast"));
+    SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)buf);
+  }
 
   // Debug group
   ov_snprintf_wchar(buf, sizeof(buf) / sizeof(WCHAR), ph, ph, pgettext("config", "Debug"));
@@ -357,6 +371,13 @@ static INT_PTR init_dialog(HWND dialog, struct dialog_data *data) {
     value = false;
     if (ptk_config_get_manual_shift_psd(data->config, &value, &err)) {
       SendMessageW(GetDlgItem(dialog, id_check_manual_shift_psd), BM_SETCHECK, value ? BST_CHECKED : BST_UNCHECKED, 0);
+    } else {
+      OV_ERROR_REPORT(&err, NULL);
+    }
+
+    int quality = ptk_resize_quality_beautiful;
+    if (ptk_config_get_resize_quality(data->config, &quality, &err)) {
+      SendMessageW(GetDlgItem(dialog, id_combo_resize_quality), CB_SETCURSEL, (WPARAM)quality, 0);
     } else {
       OV_ERROR_REPORT(&err, NULL);
     }
@@ -428,6 +449,15 @@ static bool click_ok(HWND dialog, struct dialog_data *data) {
     // Save manual_shift_psd
     LRESULT const checked = SendMessageW(GetDlgItem(dialog, id_check_manual_shift_psd), BM_GETCHECK, 0, 0);
     if (!ptk_config_set_manual_shift_psd(data->config, checked == BST_CHECKED, &err)) {
+      OV_ERROR_ADD_TRACE(&err);
+      goto cleanup;
+    }
+  }
+
+  {
+    // Save resize_quality from combo box
+    LRESULT const sel = SendMessageW(GetDlgItem(dialog, id_combo_resize_quality), CB_GETCURSEL, 0, 0);
+    if (!ptk_config_set_resize_quality(data->config, (int)sel, &err)) {
       OV_ERROR_ADD_TRACE(&err);
       goto cleanup;
     }

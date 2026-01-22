@@ -18,6 +18,7 @@ struct ptk_script_module_set_props_params {
   int offset_x;
   int offset_y;
   int tag;
+  int quality;
 };
 
 /**
@@ -28,12 +29,15 @@ struct ptk_script_module_set_props_result {
   uint64_t ckey;
   int32_t width;
   int32_t height;
+  bool flip_x;
+  bool flip_y;
 };
 
 /**
  * @brief Result structure for get_drop_config operation
  */
 struct ptk_script_module_drop_config {
+  bool debug_mode;
   bool manual_shift_wav;
   bool manual_shift_psd;
   bool manual_wav_txt_pair;
@@ -52,13 +56,14 @@ struct ptk_script_module_callbacks {
   void *userdata;
 
   /**
-   * @brief Get the current debug mode setting
+   * @brief Get the render configuration settings
    * @param userdata Context pointer
    * @param debug_mode [out] Receives true if debug mode is enabled
+   * @param resize_quality [out] Receives the resize quality value (ptk_resize_quality)
    * @param err [out] Error information on failure
    * @return true on success, false on failure
    */
-  bool (*get_debug_mode)(void *userdata, bool *debug_mode, struct ov_error *err);
+  bool (*get_render_config)(void *userdata, bool *debug_mode, int *resize_quality, struct ov_error *err);
 
   /**
    * @brief Add a PSD file to the manager
@@ -134,18 +139,20 @@ NODISCARD struct ptk_script_module *ptk_script_module_create(struct ptk_script_m
 void ptk_script_module_destroy(struct ptk_script_module **sm);
 
 /**
- * @brief Script function: Get debug mode setting and cache index
+ * @brief Script function: Get render configuration
  *
- * Pushes two results: a boolean indicating whether debug mode is enabled,
- * and an integer cache index that increments when caches should be cleared.
+ * Pushes three results:
+ * - debug_mode (boolean): true if debug mode is enabled
+ * - cache_index (integer): increments when caches should be cleared
+ * - resize_quality (integer): ptk_resize_quality value
  *
  * @param sm Script module instance
  * @param param Script module parameter interface
  * @param cache_index Current cache index value
  */
-void ptk_script_module_get_debug_mode(struct ptk_script_module *sm,
-                                      struct aviutl2_script_module_param *param,
-                                      int cache_index);
+void ptk_script_module_get_render_config(struct ptk_script_module *sm,
+                                         struct aviutl2_script_module_param *param,
+                                         int cache_index);
 
 /**
  * @brief Script function: Generate a unique tag value

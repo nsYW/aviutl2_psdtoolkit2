@@ -93,6 +93,7 @@ struct ipc_prop_params {
   int32_t const *offset_x;
   int32_t const *offset_y;
   uint32_t const *tag;
+  int32_t const *quality;
 };
 
 struct ipc_prop_result {
@@ -100,6 +101,8 @@ struct ipc_prop_result {
   uint64_t ckey;
   int32_t width;
   int32_t height;
+  bool flip_x;
+  bool flip_y;
 };
 
 NODISCARD bool ipc_set_props(struct ipc *const ipc,

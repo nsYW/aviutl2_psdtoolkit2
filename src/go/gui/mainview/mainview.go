@@ -1,6 +1,7 @@
 package mainview
 
 import (
+	"context"
 	"image"
 	"math"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/image/draw"
 
+	"psdtoolkit/img"
 	"psdtoolkit/jobqueue"
 	"psdtoolkit/nkhelper"
 )
@@ -23,7 +25,22 @@ const (
 	CursorWait    = 5
 )
 
+// RenderScaledFunc is a function type for rendering an image at a specific scale.
+type RenderScaledFunc func(ctx context.Context, im *img.Image, scale float64, quality img.ScaleQuality) (*image.NRGBA, error)
+
+// OnImageRenderedFunc is called after rendering completes, for thumbnail updates etc.
+type OnImageRenderedFunc func(nrgba *image.NRGBA)
+
 type MainView struct {
+	// Current image being displayed
+	currentImg *img.Image
+
+	// RenderScaled function (set by GUI, routes through IPC for thread safety)
+	renderScaled RenderScaledFunc
+
+	// onImageRendered callback for thumbnail updates
+	onImageRendered OnImageRenderedFunc
+
 	renderedImage *image.NRGBA
 	resizedImage  *image.NRGBA
 
@@ -41,7 +58,7 @@ type MainView struct {
 	forceUpdate      bool
 	forceFitToWindow bool
 
-	// pendingViewState holds the view state to restore (set by SetViewState, applied in SetRenderedImage)
+	// pendingViewState holds the view state to restore (set by SetViewState, applied in SetImage)
 	// Using optional pattern instead of flags for cleaner state management
 	pendingViewState *pendingState
 
@@ -109,6 +126,33 @@ func (mv *MainView) SetZoomRange(min, max, step float32) {
 	mv.stepZoom = step
 }
 
+// SetRenderScaled sets the render function that routes through IPC for thread safety.
+func (mv *MainView) SetRenderScaled(fn RenderScaledFunc) {
+	mv.renderScaled = fn
+}
+
+// SetOnImageRendered sets the callback for when image rendering completes.
+// This is used for thumbnail updates that run in parallel with display rendering.
+func (mv *MainView) SetOnImageRendered(fn OnImageRenderedFunc) {
+	mv.onImageRendered = fn
+}
+
+// SetImage sets the current image and triggers a re-render.
+func (mv *MainView) SetImage(im *img.Image) {
+	mv.currentImg = im
+
+	// Apply pending view state if exists, otherwise auto-adjust zoom
+	if mv.pendingViewState != nil {
+		mv.zoom = mv.pendingViewState.zoom
+		mv.forceUpdate = true
+	} else if mv.resizedImage == nil && im != nil {
+		// Auto-adjust zoom for fresh images
+		mv.adjustZoom(im.PSD.CanvasRect)
+	}
+
+	mv.updateViewImage(vrmFastAfterBeautiful)
+}
+
 // SetCursorChangeCallback sets the callback for cursor changes.
 // The callback receives cursor type (use w32.CursorArrow, w32.CursorSizeAll, etc.)
 func (mv *MainView) SetCursorChangeCallback(fn func(cursor int)) {
@@ -128,7 +172,7 @@ func (mv *MainView) GetViewState() (zoom, scrollX, scrollY float64) {
 	return mv.zoom, x, y
 }
 
-// SetViewState queues a view state restoration (applied in SetRenderedImage)
+// SetViewState queues a view state restoration (applied in SetImage)
 // ScrollX/ScrollY should be normalized 0.0-1.0 values
 func (mv *MainView) SetViewState(zoom, scrollX, scrollY float64) {
 	mv.pendingViewState = &pendingState{
@@ -154,22 +198,6 @@ func (mv *MainView) adjustZoom(imageRect image.Rectangle) {
 	}
 	mv.zoom = math.Log(z) / math.Ln2
 	mv.forceFitToWindow = true
-}
-
-func (mv *MainView) SetRenderedImage(img *image.NRGBA) {
-	mv.renderedImage = img
-
-	// Pending view state will be applied in renderCanvas where we have workspace dimensions
-	if mv.pendingViewState != nil {
-		mv.zoom = mv.pendingViewState.zoom
-		mv.forceUpdate = true
-		// Keep pendingViewState for scroll position restoration in renderCanvas
-	} else if mv.resizedImage == nil {
-		// Only auto-adjust zoom for fresh images without pending state
-		mv.adjustZoom(img.Rect)
-	}
-
-	mv.updateViewImage(vrmFastAfterBeautiful)
 }
 
 func (mv *MainView) Clear() {

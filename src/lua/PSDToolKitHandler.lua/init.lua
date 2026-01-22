@@ -5,7 +5,6 @@ M.name = "psd/wav/object handler %VERSION% by oov"
 M.priority = 1000
 
 local config = require("PSDToolKitHandler.config")
-local debug = require("PSDToolKitHandler.debug")
 local wav = require("PSDToolKitHandler.wav")
 local psd = require("PSDToolKitHandler.psd")
 
@@ -14,11 +13,7 @@ local psd = require("PSDToolKitHandler.psd")
 -- @param state table Drop state
 -- @return boolean True if drag should be accepted
 function M.drag_enter(files, state)
-	local debug_mode, cache_index = gcmz.get_script_module("PSDToolKit").get_debug_mode()
-	if cache_index < 0 then
-		error("PSDToolKit initialization failed")
-	end
-	debug.set_debug(debug_mode)
+	config.get()
 	local r = wav.has_wav_or_object(files) or psd.find_psd(files)
 	-- If only PSD files are left in the list, the drop will be rejected,
 	-- so replace them with placeholder even in drag_enter.

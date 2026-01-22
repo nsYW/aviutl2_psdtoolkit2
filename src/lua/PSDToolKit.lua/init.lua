@@ -1,6 +1,7 @@
 --- PSDToolKit %VERSION% by oov
 local M = {}
 
+local config = require("PSDToolKit.config")
 local debug = require("PSDToolKit.debug")
 local dbg = debug.dbg
 local i18n = require("PSDToolKit.i18n").i18n
@@ -34,6 +35,7 @@ local last_cache_index = nil
 -- Resets per-frame state and initializes the module for the current frame.
 function M.new_frame()
 	FrameState.clear()
+	config.clear()
 
 	-- Clean up old frames based on recent access tracking
 	local frames_to_cleanup = FrameState.get_frames_to_cleanup()
@@ -44,18 +46,10 @@ function M.new_frame()
 		SubObjectStates:cleanup_frame(frame)
 	end
 
-	local ptk = obj.module("PSDToolKit")
-	if not ptk then
-		error("PSDToolKit script module is not available")
-	end
-	local debug_mode, cache_index = ptk.get_debug_mode()
-	if cache_index < 0 then
-		error("PSDToolKit initialization failed")
-	end
-	debug.set_debug(debug_mode)
+	local cfg = config.get()
 
 	-- Clear ALL caches when cache_index changes (project load or cache clear)
-	if last_cache_index ~= cache_index then
+	if last_cache_index ~= cfg.cache_index then
 		ValueCache.clear()
 		LabFile.clear()
 		LipSync.clear()
@@ -65,8 +59,8 @@ function M.new_frame()
 		OverwriterStates:clear_all()
 		SubObjectStates:clear_all()
 		FrameState.clear_all_frames()
-		last_cache_index = cache_index
-		dbg("PSDToolKit: cache cleared (cache_index=%d)", cache_index)
+		last_cache_index = cfg.cache_index
+		dbg("PSDToolKit: cache cleared (cache_index=%d)", cfg.cache_index)
 	end
 end
 

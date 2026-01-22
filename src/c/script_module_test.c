@@ -32,8 +32,10 @@ bool ptk_error_get_main_message(struct ov_error *const err, wchar_t **const dest
 }
 
 struct mock_context {
-  bool pushed_boolean;
+  bool pushed_boolean_values[8];
+  int pushed_boolean_count;
   bool callback_value;
+  int resize_quality_value;
   int pushed_int;
   char const *pushed_string;
   int pushed_int_values[8];
@@ -90,7 +92,11 @@ struct mock_context {
 
 static struct mock_context *g_ctx = NULL;
 
-static void mock_push_result_boolean(bool value) { g_ctx->pushed_boolean = value; }
+static void mock_push_result_boolean(bool value) {
+  if (g_ctx->pushed_boolean_count < 8) {
+    g_ctx->pushed_boolean_values[g_ctx->pushed_boolean_count++] = value;
+  }
+}
 
 static void mock_push_result_int(int value) {
   g_ctx->pushed_int = value;
@@ -144,10 +150,12 @@ static char const *mock_get_param_table_string(int index, char const *key) {
   return g_ctx->param_table_strings[0];
 }
 
-static bool mock_get_debug_mode_callback(void *userdata, bool *debug_mode, struct ov_error *err) {
+static bool
+mock_get_render_config_callback(void *userdata, bool *debug_mode, int *resize_quality, struct ov_error *err) {
   (void)userdata;
   (void)err;
   *debug_mode = g_ctx->callback_value;
+  *resize_quality = g_ctx->resize_quality_value;
   return true;
 }
 
@@ -212,12 +220,12 @@ static bool mock_draw_callback(
   return true;
 }
 
-static void test_script_module_get_debug_mode(void) {
+static void test_script_module_get_render_config(void) {
   struct mock_context ctx = {0};
   g_ctx = &ctx;
 
   struct ov_error err = {0};
-  struct ptk_script_module_callbacks callbacks = {.get_debug_mode = mock_get_debug_mode_callback};
+  struct ptk_script_module_callbacks callbacks = {.get_render_config = mock_get_render_config_callback};
   struct ptk_script_module *sm = ptk_script_module_create(&callbacks, &err);
   if (!TEST_SUCCEEDED(sm != NULL, &err)) {
     return;
@@ -227,14 +235,22 @@ static void test_script_module_get_debug_mode(void) {
                                               .push_result_int = mock_push_result_int};
 
   ctx.callback_value = true;
-  ptk_script_module_get_debug_mode(sm, &param, 42);
-  TEST_CHECK(ctx.pushed_boolean == true);
-  TEST_CHECK(ctx.pushed_int == 42);
+  ctx.resize_quality_value = 1;
+  ctx.pushed_boolean_count = 0;
+  ctx.pushed_int_count = 0;
+  ptk_script_module_get_render_config(sm, &param, 42);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == true);
+  TEST_CHECK(ctx.pushed_int_values[0] == 42);
+  TEST_CHECK(ctx.pushed_int_values[1] == 1);
 
   ctx.callback_value = false;
-  ptk_script_module_get_debug_mode(sm, &param, 123);
-  TEST_CHECK(ctx.pushed_boolean == false);
-  TEST_CHECK(ctx.pushed_int == 123);
+  ctx.resize_quality_value = 0;
+  ctx.pushed_boolean_count = 0;
+  ctx.pushed_int_count = 0;
+  ptk_script_module_get_render_config(sm, &param, 123);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
+  TEST_CHECK(ctx.pushed_int_values[0] == 123);
+  TEST_CHECK(ctx.pushed_int_values[1] == 0);
 
   ptk_script_module_destroy(&sm);
   g_ctx = NULL;
@@ -288,33 +304,36 @@ static void test_script_module_add_psd_file(void) {
   ctx.param_ints[1] = 12345;
   ctx.add_file_should_succeed = true;
   ctx.add_file_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_add_psd_file(sm, &param);
 
   TEST_CHECK(ctx.add_file_called);
   TEST_CHECK(strcmp(ctx.received_path, "C:/test/image.psd") == 0);
   TEST_CHECK(ctx.received_tag == 12345);
-  TEST_CHECK(ctx.pushed_boolean == true);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == true);
 
   // Test: callback failure
   ctx.param_strings[0] = "C:/test/another.psd";
   ctx.param_ints[1] = 99999;
   ctx.add_file_should_succeed = false;
   ctx.add_file_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_add_psd_file(sm, &param);
 
   TEST_CHECK(ctx.add_file_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: null path
   ctx.param_strings[0] = NULL;
   ctx.add_file_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_add_psd_file(sm, &param);
 
   TEST_CHECK(!ctx.add_file_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   ptk_script_module_destroy(&sm);
   g_ctx = NULL;
@@ -355,7 +374,10 @@ static void test_script_module_set_props(void) {
   ctx.set_props_result.ckey = 0xabcdef0123456789ULL;
   ctx.set_props_result.width = 800;
   ctx.set_props_result.height = 600;
+  ctx.set_props_result.flip_x = true;
+  ctx.set_props_result.flip_y = false;
   ctx.pushed_int_count = 0;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_set_props(sm, &param);
 
@@ -367,10 +389,13 @@ static void test_script_module_set_props(void) {
   TEST_CHECK(ctx.set_props_received_offset_x == 10);
   TEST_CHECK(ctx.set_props_received_offset_y == 20);
   TEST_CHECK(ctx.set_props_received_tag == 12345);
-  TEST_CHECK(ctx.pushed_boolean == true);
+  // 6 values: modified, cachekey, width, height, flip_x, flip_y
+  TEST_CHECK(ctx.pushed_boolean_values[0] == true); // modified
   TEST_CHECK(strcmp(ctx.pushed_string, "abcdef0123456789") == 0);
   TEST_CHECK(ctx.pushed_int_values[0] == 800);
   TEST_CHECK(ctx.pushed_int_values[1] == 600);
+  TEST_CHECK(ctx.pushed_boolean_values[1] == true);  // flip_x
+  TEST_CHECK(ctx.pushed_boolean_values[2] == false); // flip_y
 
   // Test: scale = 0 means not set
   ctx.set_props_called = false;
@@ -387,6 +412,7 @@ static void test_script_module_set_props(void) {
   ctx.param_table_doubles[0] = 1.0;
   ctx.param_table_ints[2] = 0;
   ctx.pushed_int_count = 0;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_set_props(sm, &param);
 
@@ -397,6 +423,7 @@ static void test_script_module_set_props(void) {
   ctx.set_props_called = false;
   ctx.param_table_strings[0] = NULL;
   ctx.pushed_int_count = 0;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_set_props(sm, &param);
 
@@ -407,11 +434,12 @@ static void test_script_module_set_props(void) {
   ctx.set_props_called = false;
   ctx.param_strings[1] = NULL;
   ctx.pushed_int_count = 0;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_set_props(sm, &param);
 
   TEST_CHECK(!ctx.set_props_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
   TEST_CHECK(strcmp(ctx.pushed_string, "") == 0);
   TEST_CHECK(ctx.pushed_int_values[0] == 0);
   TEST_CHECK(ctx.pushed_int_values[1] == 0);
@@ -421,11 +449,12 @@ static void test_script_module_set_props(void) {
   ctx.param_strings[1] = "C:/test/image.psd";
   ctx.set_props_should_succeed = false;
   ctx.pushed_int_count = 0;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_set_props(sm, &param);
 
   TEST_CHECK(ctx.set_props_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
   TEST_CHECK(strcmp(ctx.pushed_string, "") == 0);
   TEST_CHECK(ctx.pushed_int_values[0] == 0);
   TEST_CHECK(ctx.pushed_int_values[1] == 0);
@@ -453,6 +482,7 @@ static void test_script_module_get_drop_config(void) {
   // Test: successful get_drop_config with all true
   ctx.get_drop_config_should_succeed = true;
   ctx.get_drop_config_called = false;
+  ctx.drop_config_result.debug_mode = true;
   ctx.drop_config_result.manual_shift_wav = true;
   ctx.drop_config_result.manual_shift_psd = true;
   ctx.drop_config_result.manual_wav_txt_pair = true;
@@ -464,22 +494,25 @@ static void test_script_module_get_drop_config(void) {
   ptk_script_module_get_drop_config(sm, &param);
 
   TEST_CHECK(ctx.get_drop_config_called);
-  TEST_CHECK(ctx.pushed_table_num == 6);
-  TEST_CHECK(strcmp(ctx.pushed_table_keys[0], "manual_shift_wav") == 0);
+  TEST_CHECK(ctx.pushed_table_num == 7);
+  TEST_CHECK(strcmp(ctx.pushed_table_keys[0], "debug_mode") == 0);
   TEST_CHECK(ctx.pushed_table_values[0] == 1);
-  TEST_CHECK(strcmp(ctx.pushed_table_keys[1], "manual_shift_psd") == 0);
+  TEST_CHECK(strcmp(ctx.pushed_table_keys[1], "manual_shift_wav") == 0);
   TEST_CHECK(ctx.pushed_table_values[1] == 1);
-  TEST_CHECK(strcmp(ctx.pushed_table_keys[2], "manual_wav_txt_pair") == 0);
+  TEST_CHECK(strcmp(ctx.pushed_table_keys[2], "manual_shift_psd") == 0);
   TEST_CHECK(ctx.pushed_table_values[2] == 1);
-  TEST_CHECK(strcmp(ctx.pushed_table_keys[3], "manual_object_audio_text") == 0);
+  TEST_CHECK(strcmp(ctx.pushed_table_keys[3], "manual_wav_txt_pair") == 0);
   TEST_CHECK(ctx.pushed_table_values[3] == 1);
-  TEST_CHECK(strcmp(ctx.pushed_table_keys[4], "external_wav_txt_pair") == 0);
+  TEST_CHECK(strcmp(ctx.pushed_table_keys[4], "manual_object_audio_text") == 0);
   TEST_CHECK(ctx.pushed_table_values[4] == 1);
-  TEST_CHECK(strcmp(ctx.pushed_table_keys[5], "external_object_audio_text") == 0);
+  TEST_CHECK(strcmp(ctx.pushed_table_keys[5], "external_wav_txt_pair") == 0);
   TEST_CHECK(ctx.pushed_table_values[5] == 1);
+  TEST_CHECK(strcmp(ctx.pushed_table_keys[6], "external_object_audio_text") == 0);
+  TEST_CHECK(ctx.pushed_table_values[6] == 1);
 
   // Test: successful get_drop_config with all false
   ctx.get_drop_config_called = false;
+  ctx.drop_config_result.debug_mode = false;
   ctx.drop_config_result.manual_shift_wav = false;
   ctx.drop_config_result.manual_shift_psd = false;
   ctx.drop_config_result.manual_wav_txt_pair = false;
@@ -491,16 +524,18 @@ static void test_script_module_get_drop_config(void) {
   ptk_script_module_get_drop_config(sm, &param);
 
   TEST_CHECK(ctx.get_drop_config_called);
-  TEST_CHECK(ctx.pushed_table_num == 6);
+  TEST_CHECK(ctx.pushed_table_num == 7);
   TEST_CHECK(ctx.pushed_table_values[0] == 0);
   TEST_CHECK(ctx.pushed_table_values[1] == 0);
   TEST_CHECK(ctx.pushed_table_values[2] == 0);
   TEST_CHECK(ctx.pushed_table_values[3] == 0);
   TEST_CHECK(ctx.pushed_table_values[4] == 0);
   TEST_CHECK(ctx.pushed_table_values[5] == 0);
+  TEST_CHECK(ctx.pushed_table_values[6] == 0);
 
   // Test: mixed values
   ctx.get_drop_config_called = false;
+  ctx.drop_config_result.debug_mode = true;
   ctx.drop_config_result.manual_shift_wav = true;
   ctx.drop_config_result.manual_shift_psd = false;
   ctx.drop_config_result.manual_wav_txt_pair = false;
@@ -512,24 +547,25 @@ static void test_script_module_get_drop_config(void) {
   ptk_script_module_get_drop_config(sm, &param);
 
   TEST_CHECK(ctx.get_drop_config_called);
-  TEST_CHECK(ctx.pushed_table_num == 6);
+  TEST_CHECK(ctx.pushed_table_num == 7);
   TEST_CHECK(ctx.pushed_table_values[0] == 1);
-  TEST_CHECK(ctx.pushed_table_values[1] == 0);
+  TEST_CHECK(ctx.pushed_table_values[1] == 1);
   TEST_CHECK(ctx.pushed_table_values[2] == 0);
-  TEST_CHECK(ctx.pushed_table_values[3] == 1);
-  TEST_CHECK(ctx.pushed_table_values[4] == 0);
-  TEST_CHECK(ctx.pushed_table_values[5] == 1);
+  TEST_CHECK(ctx.pushed_table_values[3] == 0);
+  TEST_CHECK(ctx.pushed_table_values[4] == 1);
+  TEST_CHECK(ctx.pushed_table_values[5] == 0);
+  TEST_CHECK(ctx.pushed_table_values[6] == 1);
 
   // Test: callback failure
   ctx.get_drop_config_called = false;
   ctx.get_drop_config_should_succeed = false;
   ctx.pushed_table_num = 0;
-  ctx.pushed_boolean = true; // reset
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_get_drop_config(sm, &param);
 
   TEST_CHECK(ctx.get_drop_config_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   ptk_script_module_destroy(&sm);
   g_ctx = NULL;
@@ -560,6 +596,7 @@ static void test_script_module_draw(void) {
   ctx.param_strings[4] = "abcdef0123456789";  // cachekey_hex
   ctx.draw_should_succeed = true;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
@@ -569,77 +606,84 @@ static void test_script_module_draw(void) {
   TEST_CHECK(ctx.draw_received_width == 800);
   TEST_CHECK(ctx.draw_received_height == 600);
   TEST_CHECK(ctx.draw_received_ckey == 0xabcdef0123456789ULL);
-  TEST_CHECK(ctx.pushed_boolean == true);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == true);
 
   // Test: uppercase hex also works
   ctx.param_strings[4] = "ABCDEF0123456789";
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(ctx.draw_called);
   TEST_CHECK(ctx.draw_received_ckey == 0xABCDEF0123456789ULL);
-  TEST_CHECK(ctx.pushed_boolean == true);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == true);
 
   // Test: callback failure
   ctx.param_strings[4] = "abcdef0123456789";
   ctx.draw_should_succeed = false;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: null path -> callback not called
   ctx.param_strings[1] = NULL;
   ctx.draw_should_succeed = true;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(!ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: null cachekey -> callback not called
   ctx.param_strings[1] = "C:/test/image.psd";
   ctx.param_strings[4] = NULL;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(!ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: invalid width (<= 0) -> callback not called
   ctx.param_strings[4] = "abcdef0123456789";
   ctx.param_ints[2] = 0;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(!ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: invalid height (<= 0) -> callback not called
   ctx.param_ints[2] = 800;
   ctx.param_ints[3] = -1;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(!ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: invalid hex character -> callback not called
   ctx.param_ints[3] = 600;
   ctx.param_strings[4] = "abcdef012345678g"; // 'g' is invalid
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(!ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   ptk_script_module_destroy(&sm);
   g_ctx = NULL;
@@ -719,7 +763,7 @@ static void test_script_module_get_preferred_languages(void) {
 }
 
 TEST_LIST = {
-    {"test_script_module_get_debug_mode", test_script_module_get_debug_mode},
+    {"test_script_module_get_render_config", test_script_module_get_render_config},
     {"test_script_module_generate_tag", test_script_module_generate_tag},
     {"test_script_module_add_psd_file", test_script_module_add_psd_file},
     {"test_script_module_set_props", test_script_module_set_props},

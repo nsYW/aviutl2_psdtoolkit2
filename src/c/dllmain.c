@@ -395,32 +395,34 @@ static void config_menu_handler(HWND const hwnd, HINSTANCE const dll_hinst) {
   psdtoolkit_show_config_dialog(g_psdtoolkit, hwnd);
 }
 
-static void script_module_get_debug_mode(struct aviutl2_script_module_param *param) {
-  if (!g_script_module) {
-    param->push_result_boolean(false);
-    param->push_result_int(g_cache_index);
-    return;
-  }
-  ptk_script_module_get_debug_mode(g_script_module, param, g_cache_index);
+static void script_module_get_render_config(struct aviutl2_script_module_param *param) {
+  ptk_script_module_get_render_config(g_script_module, param, g_cache_index);
 }
+
 static void script_module_generate_tag(struct aviutl2_script_module_param *param) {
   ptk_script_module_generate_tag(g_script_module, param);
 }
+
 static void script_module_add_psd_file(struct aviutl2_script_module_param *param) {
   ptk_script_module_add_psd_file(g_script_module, param);
 }
+
 static void script_module_set_props(struct aviutl2_script_module_param *param) {
   ptk_script_module_set_props(g_script_module, param);
 }
+
 static void script_module_get_drop_config(struct aviutl2_script_module_param *param) {
   ptk_script_module_get_drop_config(g_script_module, param);
 }
+
 static void script_module_draw(struct aviutl2_script_module_param *param) {
   ptk_script_module_draw(g_script_module, param);
 }
+
 static void script_module_get_preferred_languages(struct aviutl2_script_module_param *param) {
   ptk_script_module_get_preferred_languages(g_script_module, param);
 }
+
 static void script_module_read_text_file(struct aviutl2_script_module_param *param) {
   ptk_script_module_read_text_file(g_script_module, param);
 }
@@ -562,7 +564,7 @@ void __declspec(dllexport) RegisterPlugin(struct aviutl2_host_app_table *host) {
   psdtoolkit_set_edit_handle(g_psdtoolkit, edit_handle);
 
   static struct aviutl2_script_module_function script_module_functions[] = {
-      {L"get_debug_mode", script_module_get_debug_mode},
+      {L"get_render_config", script_module_get_render_config},
       {L"get_drop_config", script_module_get_drop_config},
       {L"get_preferred_languages", script_module_get_preferred_languages},
       {L"generate_tag", script_module_generate_tag},

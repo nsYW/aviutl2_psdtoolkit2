@@ -24,6 +24,8 @@ struct ptk_config {
   bool external_object_audio_text;
   // Debug mode
   bool debug_mode;
+  // Resize quality (ptk_resize_quality)
+  int resize_quality;
 };
 
 static bool get_dll_directory(NATIVE_CHAR **const dir, struct ov_error *const err) {
@@ -87,6 +89,7 @@ struct ptk_config *ptk_config_create(struct ov_error *const err) {
       .external_wav_txt_pair = false,
       .external_object_audio_text = false,
       .debug_mode = false,
+      .resize_quality = ptk_resize_quality_beautiful,
   };
 
   result = cfg;
@@ -149,6 +152,7 @@ static char const g_json_key_manual_object_audio_text[] = "manual_object_audio_t
 static char const g_json_key_external_wav_txt_pair[] = "external_wav_txt_pair";
 static char const g_json_key_external_object_audio_text[] = "external_object_audio_text";
 static char const g_json_key_debug_mode[] = "debug_mode";
+static char const g_json_key_resize_quality[] = "resize_quality";
 
 bool ptk_config_load(struct ptk_config *const config, struct ov_error *const err) {
   if (!config) {
@@ -250,6 +254,11 @@ bool ptk_config_load(struct ptk_config *const config, struct ov_error *const err
     if (val && yyjson_is_bool(val)) {
       config->debug_mode = yyjson_get_bool(val);
     }
+
+    val = yyjson_obj_get(root, g_json_key_resize_quality);
+    if (val && yyjson_is_int(val)) {
+      config->resize_quality = (int)yyjson_get_int(val);
+    }
   }
 
   result = true;
@@ -305,6 +314,7 @@ bool ptk_config_save(struct ptk_config const *const config, struct ov_error *con
     yyjson_mut_obj_add_bool(doc, root, g_json_key_external_wav_txt_pair, config->external_wav_txt_pair);
     yyjson_mut_obj_add_bool(doc, root, g_json_key_external_object_audio_text, config->external_object_audio_text);
     yyjson_mut_obj_add_bool(doc, root, g_json_key_debug_mode, config->debug_mode);
+    yyjson_mut_obj_add_int(doc, root, g_json_key_resize_quality, config->resize_quality);
 
     json_str = yyjson_mut_write_opts(doc, YYJSON_WRITE_PRETTY, ptk_json_get_alc(), NULL, NULL);
     if (!json_str) {
@@ -490,5 +500,25 @@ bool ptk_config_set_debug_mode(struct ptk_config *const config, bool const value
     return false;
   }
   config->debug_mode = value;
+  return true;
+}
+
+bool ptk_config_get_resize_quality(struct ptk_config const *const config,
+                                   int *const value,
+                                   struct ov_error *const err) {
+  if (!config || !value) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    return false;
+  }
+  *value = config->resize_quality;
+  return true;
+}
+
+bool ptk_config_set_resize_quality(struct ptk_config *const config, int const value, struct ov_error *const err) {
+  if (!config) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    return false;
+  }
+  config->resize_quality = value;
   return true;
 }
