@@ -5,14 +5,14 @@ go 1.20
 require (
 	github.com/disintegration/gift v1.2.1
 	github.com/golang-ui/nuklear v0.0.0-20260112162633-30b3743ea7ae
-	github.com/oov/downscale v0.0.0-20170819221759-1bbcb5d498e2
-	github.com/oov/psd v0.0.0-20220121172623-5db5eafcecbb
+	github.com/oov/downscale v0.0.0-20260122030047-acc72daa8b14
+	github.com/oov/psd v0.0.0-20260122025056-bf860f016f0a
 	github.com/pkg/errors v0.9.1
 	golang.org/x/image v0.24.0
 	golang.org/x/sys v0.30.0
 	golang.org/x/text v0.22.0
 )
 
-require github.com/gopherjs/gopherjs v1.17.2 // indirect
+require github.com/gopherjs/gopherjs v1.20.0 // indirect
 
 replace github.com/golang-ui/nuklear v0.0.0-20260112162633-30b3743ea7ae => github.com/oov/nuklear v0.0.0-20260121083529-472bd03c028b
