@@ -104,10 +104,12 @@ func (ipc *IPC) draw(id int, filePath string, width, height int, shmResized bool
 
 	dataLen = width * height * 4
 
-	// Ensure shared memory is opened (reopen if C side resized it)
-	if err = ipc.shm.EnsureOpen(shmResized); err != nil {
+	// Open shared memory (always open fresh to allow C side to resize)
+	if err = ipc.shm.EnsureOpen(true); err != nil {
 		return 0, errors.Wrap(err, "ipc: could not open shared memory")
 	}
+	// Close when done to allow C side to resize if needed
+	defer ipc.shm.Close()
 
 	img, err := ipc.tmpImg.Load(id, filePath)
 	if err != nil {
