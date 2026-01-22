@@ -145,12 +145,13 @@ func (img *Image) ScaledCanvasRect() image.Rectangle {
 }
 
 func (img *Image) Render(ctx context.Context) (*image.NRGBA, error) {
-	return img.RenderWithScale(ctx, float64(img.Scale), img.ScaleQuality)
+	return img.RenderWithScale(ctx, float64(img.Scale), img.ScaleQuality, true)
 }
 
 // RenderWithScale renders the image at a specific scale with the given quality.
-// This is the main rendering entry point that handles both PSD rendering and downscaling.
-func (img *Image) RenderWithScale(ctx context.Context, scale float64, quality ScaleQuality) (*image.NRGBA, error) {
+// When applyFlip is false, the returned image does not have flip applied, which is useful
+// when the caller wants to apply flip together with other transformations (e.g., offset) in a single pass.
+func (img *Image) RenderWithScale(ctx context.Context, scale float64, quality ScaleQuality, applyFlip bool) (*image.NRGBA, error) {
 	var err error
 	tileSize := img.PSD.Renderer.TileSize()
 
@@ -257,9 +258,9 @@ func (img *Image) RenderWithScale(ctx context.Context, scale float64, quality Sc
 		}
 	}
 
-	// Apply flip
+	// Apply flip (only if requested)
 	f := img.Layers.Flip
-	if f != FlipNone {
+	if applyFlip && f != FlipNone {
 		tmp := image.NewNRGBA(nrgba.Rect)
 		g := gift.New()
 		if f == FlipX || f == FlipXY {

@@ -25,6 +25,11 @@ struct ipc {
   uint32_t reply_value;
   char *reply_error;
 
+  // Shared memory for pixel data transfer
+  HANDLE shm_handle;
+  void *shm_view;
+  size_t shm_size;
+
   struct ipc_options opt;
   bool exit_requested;
 };
@@ -456,6 +461,8 @@ bool ipc_init(struct ipc **const ipc, struct ipc_options const *const opt, struc
     goto cleanup;
   }
 
+  // Shared memory will be opened on first DRAW when Go side creates it
+
   *ipc = self;
   result = true;
 
@@ -496,6 +503,14 @@ void ipc_exit(struct ipc **const ipc) {
   }
   if (self->h_stdout != INVALID_HANDLE_VALUE) {
     CloseHandle(self->h_stdout);
+  }
+  if (self->shm_view) {
+    UnmapViewOfFile(self->shm_view);
+    self->shm_view = NULL;
+  }
+  if (self->shm_handle) {
+    CloseHandle(self->shm_handle);
+    self->shm_handle = NULL;
   }
   if (self->process != INVALID_HANDLE_VALUE) {
     WaitForSingleObject(self->process, 5000);
@@ -618,27 +633,57 @@ bool ipc_draw(struct ipc *const self,
   uint32_t reply = 0;
   int32_t len = 0;
   bool result = false;
+  size_t const required_size = (size_t)width * (size_t)height * 4;
+  int32_t shm_resized = 0;
 
-  LARGE_INTEGER freq, t0, t1, t2, t3;
-  QueryPerformanceFrequency(&freq);
-  QueryPerformanceCounter(&t0);
+  // Ensure shared memory is large enough
+  if (self->shm_size < required_size) {
+    // Close existing mapping if any
+    if (self->shm_view) {
+      UnmapViewOfFile(self->shm_view);
+      self->shm_view = NULL;
+    }
+    if (self->shm_handle) {
+      CloseHandle(self->shm_handle);
+      self->shm_handle = NULL;
+    }
+
+    // Create new shared memory with required size (round up to next MB)
+    size_t const new_size = ((required_size + 1024 * 1024 - 1) / (1024 * 1024)) * (1024 * 1024);
+    DWORD const pid = GetCurrentProcessId();
+    wchar_t shm_name[64];
+    wsprintfW(shm_name, L"Local\\PSDTKit_Pixel_%lu", pid);
+
+    self->shm_handle = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, (DWORD)new_size, shm_name);
+    if (!self->shm_handle) {
+      OV_ERROR_SET_HRESULT(err, HRESULT_FROM_WIN32(GetLastError()));
+      goto cleanup;
+    }
+    self->shm_view = MapViewOfFile(self->shm_handle, FILE_MAP_ALL_ACCESS, 0, 0, new_size);
+    if (!self->shm_view) {
+      CloseHandle(self->shm_handle);
+      self->shm_handle = NULL;
+      OV_ERROR_SET_HRESULT(err, HRESULT_FROM_WIN32(GetLastError()));
+      goto cleanup;
+    }
+    self->shm_size = new_size;
+    shm_resized = 1;
+  }
 
   mtx_lock(&self->mtx_stdin);
   if (!write_uint32(self->h_stdin, cmd, err) || !write_int32(self->h_stdin, id, err) ||
       !write_string(self->h_stdin, path_utf8, err) || !write_int32(self->h_stdin, width, err) ||
-      !write_int32(self->h_stdin, height, err)) {
+      !write_int32(self->h_stdin, height, err) || !write_int32(self->h_stdin, shm_resized, err)) {
     mtx_unlock(&self->mtx_stdin);
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
   mtx_unlock(&self->mtx_stdin);
-  QueryPerformanceCounter(&t1);
 
   if (!wait_for_reply(self, &reply, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
   }
-  QueryPerformanceCounter(&t2);
 
   if (!read_int32(self->h_stdout, &len, err)) {
     OV_ERROR_ADD_TRACE(err);
@@ -648,23 +693,11 @@ bool ipc_draw(struct ipc *const self,
     OV_ERROR_SET_GENERIC(err, ov_error_generic_fail);
     goto cleanup;
   }
-  if (len > 0) {
-    if (!read_all(self->h_stdout, p, (size_t)len, err)) {
-      OV_ERROR_ADD_TRACE(err);
-      goto cleanup;
-    }
-  }
-  QueryPerformanceCounter(&t3);
 
-  ptk_logf_info(NULL,
-                NULL,
-                "[ipc_draw] size=%dx%d send=%.2fms wait=%.2fms read=%.2fms (len=%d)",
-                width,
-                height,
-                (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)freq.QuadPart,
-                (double)(t2.QuadPart - t1.QuadPart) * 1000.0 / (double)freq.QuadPart,
-                (double)(t3.QuadPart - t2.QuadPart) * 1000.0 / (double)freq.QuadPart,
-                len);
+  if (len > 0) {
+    // Copy from shared memory
+    memcpy(p, self->shm_view, (size_t)len);
+  }
 
   result = true;
 cleanup:
@@ -819,6 +852,19 @@ bool ipc_set_props(struct ipc *const self,
   if (!read_uint32(self->h_stdout, (uint32_t *)&result->height, err)) {
     OV_ERROR_ADD_TRACE(err);
     goto cleanup;
+  }
+  {
+    int32_t flip_x = 0, flip_y = 0;
+    if (!read_int32(self->h_stdout, &flip_x, err)) {
+      OV_ERROR_ADD_TRACE(err);
+      goto cleanup;
+    }
+    if (!read_int32(self->h_stdout, &flip_y, err)) {
+      OV_ERROR_ADD_TRACE(err);
+      goto cleanup;
+    }
+    result->flip_x = flip_x != 0;
+    result->flip_y = flip_y != 0;
   }
   res = true;
 cleanup:

@@ -232,11 +232,13 @@ void ptk_script_module_set_props(struct ptk_script_module *const sm, struct aviu
     char ckey_hex[17];
     ckey_to_hex(result.ckey, ckey_hex);
 
-    // Return 4 values: modified, cachekey_hex, width, height
+    // Return 6 values: modified, cachekey_hex, width, height, flip_x, flip_y
     param->push_result_boolean(result.modified);
     param->push_result_string(ckey_hex);
     param->push_result_int(result.width);
     param->push_result_int(result.height);
+    param->push_result_boolean(result.flip_x);
+    param->push_result_boolean(result.flip_y);
   }
 
   success = true;
@@ -247,6 +249,8 @@ cleanup:
     param->push_result_string("");
     param->push_result_int(0);
     param->push_result_int(0);
+    param->push_result_boolean(false);
+    param->push_result_boolean(false);
     ptk_logf_error(&err, "%1$hs", "%1$hs", gettext("failed to set PSD properties."));
     OV_ERROR_DESTROY(&err);
   }

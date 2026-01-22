@@ -120,6 +120,8 @@ static bool sm_set_props(void *const userdata,
   result->ckey = ipc_result.ckey;
   result->width = ipc_result.width;
   result->height = ipc_result.height;
+  result->flip_x = ipc_result.flip_x;
+  result->flip_y = ipc_result.flip_y;
   return true;
 }
 

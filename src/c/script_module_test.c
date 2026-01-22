@@ -32,7 +32,8 @@ bool ptk_error_get_main_message(struct ov_error *const err, wchar_t **const dest
 }
 
 struct mock_context {
-  bool pushed_boolean;
+  bool pushed_boolean_values[8];
+  int pushed_boolean_count;
   bool callback_value;
   int pushed_int;
   char const *pushed_string;
@@ -90,7 +91,11 @@ struct mock_context {
 
 static struct mock_context *g_ctx = NULL;
 
-static void mock_push_result_boolean(bool value) { g_ctx->pushed_boolean = value; }
+static void mock_push_result_boolean(bool value) {
+  if (g_ctx->pushed_boolean_count < 8) {
+    g_ctx->pushed_boolean_values[g_ctx->pushed_boolean_count++] = value;
+  }
+}
 
 static void mock_push_result_int(int value) {
   g_ctx->pushed_int = value;
@@ -227,13 +232,15 @@ static void test_script_module_get_debug_mode(void) {
                                               .push_result_int = mock_push_result_int};
 
   ctx.callback_value = true;
+  ctx.pushed_boolean_count = 0;
   ptk_script_module_get_debug_mode(sm, &param, 42);
-  TEST_CHECK(ctx.pushed_boolean == true);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == true);
   TEST_CHECK(ctx.pushed_int == 42);
 
   ctx.callback_value = false;
+  ctx.pushed_boolean_count = 0;
   ptk_script_module_get_debug_mode(sm, &param, 123);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
   TEST_CHECK(ctx.pushed_int == 123);
 
   ptk_script_module_destroy(&sm);
@@ -288,33 +295,36 @@ static void test_script_module_add_psd_file(void) {
   ctx.param_ints[1] = 12345;
   ctx.add_file_should_succeed = true;
   ctx.add_file_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_add_psd_file(sm, &param);
 
   TEST_CHECK(ctx.add_file_called);
   TEST_CHECK(strcmp(ctx.received_path, "C:/test/image.psd") == 0);
   TEST_CHECK(ctx.received_tag == 12345);
-  TEST_CHECK(ctx.pushed_boolean == true);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == true);
 
   // Test: callback failure
   ctx.param_strings[0] = "C:/test/another.psd";
   ctx.param_ints[1] = 99999;
   ctx.add_file_should_succeed = false;
   ctx.add_file_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_add_psd_file(sm, &param);
 
   TEST_CHECK(ctx.add_file_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: null path
   ctx.param_strings[0] = NULL;
   ctx.add_file_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_add_psd_file(sm, &param);
 
   TEST_CHECK(!ctx.add_file_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   ptk_script_module_destroy(&sm);
   g_ctx = NULL;
@@ -355,7 +365,10 @@ static void test_script_module_set_props(void) {
   ctx.set_props_result.ckey = 0xabcdef0123456789ULL;
   ctx.set_props_result.width = 800;
   ctx.set_props_result.height = 600;
+  ctx.set_props_result.flip_x = true;
+  ctx.set_props_result.flip_y = false;
   ctx.pushed_int_count = 0;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_set_props(sm, &param);
 
@@ -367,10 +380,13 @@ static void test_script_module_set_props(void) {
   TEST_CHECK(ctx.set_props_received_offset_x == 10);
   TEST_CHECK(ctx.set_props_received_offset_y == 20);
   TEST_CHECK(ctx.set_props_received_tag == 12345);
-  TEST_CHECK(ctx.pushed_boolean == true);
+  // 6 values: modified, cachekey, width, height, flip_x, flip_y
+  TEST_CHECK(ctx.pushed_boolean_values[0] == true); // modified
   TEST_CHECK(strcmp(ctx.pushed_string, "abcdef0123456789") == 0);
   TEST_CHECK(ctx.pushed_int_values[0] == 800);
   TEST_CHECK(ctx.pushed_int_values[1] == 600);
+  TEST_CHECK(ctx.pushed_boolean_values[1] == true);  // flip_x
+  TEST_CHECK(ctx.pushed_boolean_values[2] == false); // flip_y
 
   // Test: scale = 0 means not set
   ctx.set_props_called = false;
@@ -387,6 +403,7 @@ static void test_script_module_set_props(void) {
   ctx.param_table_doubles[0] = 1.0;
   ctx.param_table_ints[2] = 0;
   ctx.pushed_int_count = 0;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_set_props(sm, &param);
 
@@ -397,6 +414,7 @@ static void test_script_module_set_props(void) {
   ctx.set_props_called = false;
   ctx.param_table_strings[0] = NULL;
   ctx.pushed_int_count = 0;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_set_props(sm, &param);
 
@@ -407,11 +425,12 @@ static void test_script_module_set_props(void) {
   ctx.set_props_called = false;
   ctx.param_strings[1] = NULL;
   ctx.pushed_int_count = 0;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_set_props(sm, &param);
 
   TEST_CHECK(!ctx.set_props_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
   TEST_CHECK(strcmp(ctx.pushed_string, "") == 0);
   TEST_CHECK(ctx.pushed_int_values[0] == 0);
   TEST_CHECK(ctx.pushed_int_values[1] == 0);
@@ -421,11 +440,12 @@ static void test_script_module_set_props(void) {
   ctx.param_strings[1] = "C:/test/image.psd";
   ctx.set_props_should_succeed = false;
   ctx.pushed_int_count = 0;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_set_props(sm, &param);
 
   TEST_CHECK(ctx.set_props_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
   TEST_CHECK(strcmp(ctx.pushed_string, "") == 0);
   TEST_CHECK(ctx.pushed_int_values[0] == 0);
   TEST_CHECK(ctx.pushed_int_values[1] == 0);
@@ -524,12 +544,12 @@ static void test_script_module_get_drop_config(void) {
   ctx.get_drop_config_called = false;
   ctx.get_drop_config_should_succeed = false;
   ctx.pushed_table_num = 0;
-  ctx.pushed_boolean = true; // reset
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_get_drop_config(sm, &param);
 
   TEST_CHECK(ctx.get_drop_config_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   ptk_script_module_destroy(&sm);
   g_ctx = NULL;
@@ -560,6 +580,7 @@ static void test_script_module_draw(void) {
   ctx.param_strings[4] = "abcdef0123456789";  // cachekey_hex
   ctx.draw_should_succeed = true;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
@@ -569,77 +590,84 @@ static void test_script_module_draw(void) {
   TEST_CHECK(ctx.draw_received_width == 800);
   TEST_CHECK(ctx.draw_received_height == 600);
   TEST_CHECK(ctx.draw_received_ckey == 0xabcdef0123456789ULL);
-  TEST_CHECK(ctx.pushed_boolean == true);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == true);
 
   // Test: uppercase hex also works
   ctx.param_strings[4] = "ABCDEF0123456789";
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(ctx.draw_called);
   TEST_CHECK(ctx.draw_received_ckey == 0xABCDEF0123456789ULL);
-  TEST_CHECK(ctx.pushed_boolean == true);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == true);
 
   // Test: callback failure
   ctx.param_strings[4] = "abcdef0123456789";
   ctx.draw_should_succeed = false;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: null path -> callback not called
   ctx.param_strings[1] = NULL;
   ctx.draw_should_succeed = true;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(!ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: null cachekey -> callback not called
   ctx.param_strings[1] = "C:/test/image.psd";
   ctx.param_strings[4] = NULL;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(!ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: invalid width (<= 0) -> callback not called
   ctx.param_strings[4] = "abcdef0123456789";
   ctx.param_ints[2] = 0;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(!ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: invalid height (<= 0) -> callback not called
   ctx.param_ints[2] = 800;
   ctx.param_ints[3] = -1;
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(!ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   // Test: invalid hex character -> callback not called
   ctx.param_ints[3] = 600;
   ctx.param_strings[4] = "abcdef012345678g"; // 'g' is invalid
   ctx.draw_called = false;
+  ctx.pushed_boolean_count = 0;
 
   ptk_script_module_draw(sm, &param);
 
   TEST_CHECK(!ctx.draw_called);
-  TEST_CHECK(ctx.pushed_boolean == false);
+  TEST_CHECK(ctx.pushed_boolean_values[0] == false);
 
   ptk_script_module_destroy(&sm);
   g_ctx = NULL;

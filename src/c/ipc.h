@@ -101,6 +101,8 @@ struct ipc_prop_result {
   uint64_t ckey;
   int32_t width;
   int32_t height;
+  bool flip_x;
+  bool flip_y;
 };
 
 NODISCARD bool ipc_set_props(struct ipc *const ipc,

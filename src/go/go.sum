@@ -2,12 +2,12 @@ github.com/disintegration/gift v1.2.1 h1:Y005a1X4Z7Uc+0gLpSAsKhWi4qLtsdEcMIbbdvd
 github.com/disintegration/gift v1.2.1/go.mod h1:Jh2i7f7Q2BM7Ezno3PhfezbR1xpUg9dUg3/RlKGr4HI=
 github.com/gopherjs/gopherjs v1.20.0 h1:HBMSWqzxTh6EI/zIcju7ZpBh8rP8xnFhmRDnPklHBls=
 github.com/gopherjs/gopherjs v1.20.0/go.mod h1:h+FTmmLgbXMmmtuZFp9bUqXciN429Wx0sJEJuMnpyfM=
-github.com/oov/downscale v0.0.0-20260122030047-acc72daa8b14 h1:hKfhio6xXtz1Nzq116iLV8tqCb04vT/V2Cz4T73Cx3Y=
-github.com/oov/downscale v0.0.0-20260122030047-acc72daa8b14/go.mod h1:uIYALx3ftCivGbwVueAxrCzV3G3I/seUXED+dL+CG48=
+github.com/oov/downscale v0.0.0-20260122084147-dfd8074873c9 h1:qyl+RyxTcqV30XV1pSr/uzsghDnuWHH5/q4oDPkHFyY=
+github.com/oov/downscale v0.0.0-20260122084147-dfd8074873c9/go.mod h1:uIYALx3ftCivGbwVueAxrCzV3G3I/seUXED+dL+CG48=
 github.com/oov/nuklear v0.0.0-20260121083529-472bd03c028b h1:96AIG5CCi327ALH3zWKcJlYwgWH28f/yc2i/vHpvARM=
 github.com/oov/nuklear v0.0.0-20260121083529-472bd03c028b/go.mod h1:wgadnilqJXDXoAgRgy2EQjO/gCxYMQVoJbOC0Ut6gy8=
-github.com/oov/psd v0.0.0-20260122025056-bf860f016f0a h1:AW2FeM31ppOcl/mrQT15gCa2gQfavHFVVKRuABddI9s=
-github.com/oov/psd v0.0.0-20260122025056-bf860f016f0a/go.mod h1:GHI1bnmAcbp96z6LNfBJvtrjxhaXGkbsk967utPlvL8=
+github.com/oov/psd v0.0.0-20260122084234-c463b6a89e2f h1:67UmABhaufAdSFaRO/wcaTn0XgHWCirjwfFf21ZNPAc=
+github.com/oov/psd v0.0.0-20260122084234-c463b6a89e2f/go.mod h1:GHI1bnmAcbp96z6LNfBJvtrjxhaXGkbsk967utPlvL8=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 golang.org/x/image v0.24.0 h1:AN7zRgVsbvmTfNyqIbbOraYL8mSwcKncEj8ofjgzcMQ=

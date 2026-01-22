@@ -29,6 +29,8 @@ struct ptk_script_module_set_props_result {
   uint64_t ckey;
   int32_t width;
   int32_t height;
+  bool flip_x;
+  bool flip_y;
 };
 
 /**
