@@ -239,6 +239,25 @@ static int input_ptkcache_read_video(aviutl2_input_handle ih, int frame, void *b
 void __declspec(dllexport) InitializeLogger(struct aviutl2_log_handle *logger);
 void __declspec(dllexport) InitializeLogger(struct aviutl2_log_handle *logger) { ptk_logf_set_handle(logger); }
 
+struct aviutl2_common_plugin_table *__declspec(dllexport) GetCommonPluginTable(void);
+struct aviutl2_common_plugin_table *__declspec(dllexport) GetCommonPluginTable(void) {
+  static wchar_t const name[] = L"PSDToolKit";
+  static wchar_t information[64];
+  static struct aviutl2_common_plugin_table table = {
+      .name = name,
+      .information = information,
+  };
+  if (information[0] == L'\0') {
+    ov_snprintf_wchar(information,
+                      sizeof(information) / sizeof(information[0]),
+                      L"%1$ls %2$hs by oov",
+                      L"%1$ls %2$hs by oov",
+                      name,
+                      PTK_VERSION);
+  }
+  return &table;
+}
+
 DWORD __declspec(dllexport) RequiredVersion(void);
 DWORD __declspec(dllexport) RequiredVersion(void) { return required_aviutl2_version; }
 
@@ -557,12 +576,6 @@ void __declspec(dllexport) RegisterPlugin(struct aviutl2_host_app_table *host);
 void __declspec(dllexport) RegisterPlugin(struct aviutl2_host_app_table *host) {
   struct ov_error err = {0};
   bool success = false;
-
-  // Set plugin information
-  static wchar_t information[64];
-  ov_snprintf_wchar(
-      information, sizeof(information) / sizeof(information[0]), L"%1$hs", L"PSDToolKit %1$s by oov", PTK_VERSION);
-  host->set_plugin_information(information);
 
   // Register handlers
   host->register_project_load_handler(project_load_handler);
