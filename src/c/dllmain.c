@@ -63,6 +63,9 @@ static HWND g_plugin_window = NULL;
 static HWND g_anm2editor_window = NULL;
 static int g_cache_index = 0;
 
+static uint32_t const required_aviutl2_version = 2004400;
+static char const required_aviutl2_version_name[] = "version2.0beta44";
+
 /**
  * @brief Increment cache index and clear the image cache.
  *
@@ -236,6 +239,9 @@ static int input_ptkcache_read_video(aviutl2_input_handle ih, int frame, void *b
 void __declspec(dllexport) InitializeLogger(struct aviutl2_log_handle *logger);
 void __declspec(dllexport) InitializeLogger(struct aviutl2_log_handle *logger) { ptk_logf_set_handle(logger); }
 
+DWORD __declspec(dllexport) RequiredVersion(void);
+DWORD __declspec(dllexport) RequiredVersion(void) { return required_aviutl2_version; }
+
 BOOL __declspec(dllexport) InitializePlugin(DWORD version);
 BOOL __declspec(dllexport) InitializePlugin(DWORD version) {
   struct ov_error err = {0};
@@ -245,13 +251,13 @@ BOOL __declspec(dllexport) InitializePlugin(DWORD version) {
   g_cache_index = 0;
 
   // Check minimum required AviUtl ExEdit2 version
-  if (version < 2003001) {
+  if (version < required_aviutl2_version) {
     OV_ERROR_SETF(&err,
                   ov_error_type_generic,
                   ov_error_generic_fail,
                   "%1$s",
                   gettext("PSDToolKit requires AviUtl ExEdit2 %1$s or later."),
-                  "version2.0beta30a");
+                  required_aviutl2_version_name);
     OV_ERROR_ADD_TRACE(&err);
     goto cleanup;
   }
@@ -655,14 +661,17 @@ void __declspec(dllexport) RegisterPlugin(struct aviutl2_host_app_table *host) {
 cleanup:
   if (!success) {
     g_cache_index = -1;
+    HWND owner = NULL;
+    if (edit_handle != NULL && edit_handle->get_host_app_window != NULL) {
+      owner = edit_handle->get_host_app_window();
+    }
     wchar_t main_instruction[256];
     ov_snprintf_wchar(main_instruction,
                       sizeof(main_instruction) / sizeof(main_instruction[0]),
                       L"%1$hs",
                       L"%1$hs",
                       gettext("failed to register plugin."));
-    ptk_error_dialog(
-        find_manager_window(), &err, L"PSDToolKit", main_instruction, NULL, TD_ERROR_ICON, TDCBF_OK_BUTTON);
+    ptk_error_dialog(owner, &err, L"PSDToolKit", main_instruction, NULL, TD_ERROR_ICON, TDCBF_OK_BUTTON);
     OV_ERROR_DESTROY(&err);
   }
 }
