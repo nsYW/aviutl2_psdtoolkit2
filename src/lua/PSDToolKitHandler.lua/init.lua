@@ -15,9 +15,6 @@ local psd = require("PSDToolKitHandler.psd")
 function M.drag_enter(files, state)
 	config.get()
 	local r = wav.has_wav_or_object(files) or psd.find_psd(files)
-	-- If only PSD files are left in the list, the drop will be rejected,
-	-- so replace them with placeholder even in drag_enter.
-	psd.create_placeholder(files)
 	return r
 end
 

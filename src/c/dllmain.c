@@ -457,6 +457,12 @@ static void script_module_detect_encoding(struct aviutl2_script_module_param *pa
   ptk_script_module_detect_encoding(g_script_module, param);
 }
 
+static void psd_file_drop_handler(void *param, wchar_t const *file) {
+  // Actual PSD drop processing is handled by the GCMZDrops handler script.
+  (void)param;
+  (void)file;
+}
+
 static bool load_gcmzdrops(struct aviutl2_script_module_table *const script_module_table, struct ov_error *const err) {
   wchar_t *path = NULL;
   void *dll_hinst = NULL;
@@ -582,17 +588,40 @@ void __declspec(dllexport) RegisterPlugin(struct aviutl2_host_app_table *host) {
   host->register_project_save_handler(project_save_handler);
   host->register_clear_cache_handler(clear_cache_handler);
 
-  // Register config menu
-  static wchar_t config_menu_name[64];
-  ov_snprintf_wchar(config_menu_name,
-                    sizeof(config_menu_name) / sizeof(config_menu_name[0]),
-                    L"%s",
-                    L"%s",
-                    gettext("PSDToolKit Settings..."));
-  host->register_config_menu(config_menu_name, config_menu_handler);
-
   struct aviutl2_edit_handle *const edit_handle = host->create_edit_handle();
   psdtoolkit_set_edit_handle(g_psdtoolkit, edit_handle);
+
+  // Register config menu
+  {
+    static wchar_t config_menu_name[64];
+    ov_snprintf_wchar(config_menu_name,
+                      sizeof(config_menu_name) / sizeof(config_menu_name[0]),
+                      L"%s",
+                      L"%s",
+                      gettext("PSDToolKit Settings..."));
+    host->register_config_menu(config_menu_name, config_menu_handler);
+  }
+
+  {
+    static wchar_t psd_drop_handler_name[64];
+    static wchar_t psd_drop_filefilter[64];
+    ov_snprintf_wchar(psd_drop_handler_name,
+                      sizeof(psd_drop_handler_name) / sizeof(psd_drop_handler_name[0]),
+                      L"%s",
+                      L"%s",
+                      gettext("PSD/PSB file"));
+    ov_snprintf_wchar(psd_drop_filefilter,
+                      sizeof(psd_drop_filefilter) / sizeof(psd_drop_filefilter[0]),
+                      L"%ls",
+                      L"%ls (*.psd;*.psb)|*.psd;*.psb|",
+                      psd_drop_handler_name);
+    for (wchar_t *p = psd_drop_filefilter; *p; ++p) {
+      if (*p == L'|') {
+        *p = L'\0';
+      }
+    }
+    host->register_file_drop_param_handler(psd_drop_handler_name, psd_drop_filefilter, NULL, psd_file_drop_handler);
+  }
 
   static struct aviutl2_script_module_function script_module_functions[] = {
       {L"get_render_config", script_module_get_render_config},
