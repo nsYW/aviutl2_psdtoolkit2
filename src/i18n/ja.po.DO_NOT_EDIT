@@ -124,6 +124,10 @@ msgid "AviUtl1 Animation Script"
 msgstr "AviUtl1 アニメーションスクリプト"
 
 msgctxt "config"
+msgid "Beautiful"
+msgstr "綺麗"
+
+msgctxt "config"
 msgid "Cancel"
 msgstr "キャンセル"
 
@@ -234,6 +238,10 @@ msgstr "設定の保存に失敗しました。"
 msgid "Failed to update editing image state."
 msgstr "編集画像の更新に失敗しました。"
 
+msgctxt "config"
+msgid "Fast"
+msgstr "速い"
+
 msgctxt "layerview"
 msgid "Favorites"
 msgstr "お気に入り"
@@ -315,15 +323,22 @@ msgctxt ".ptk.anm2 label"
 msgid "PSD"
 msgstr "PSD"
 
+msgid "PSD File"
+msgstr "PSDファイル"
+
 msgctxt "config"
-msgid "PSD File Drop"
-msgstr "PSDファイルドロップ"
+msgid "PSD File"
+msgstr "PSDファイル"
 
 msgctxt "anm2editor"
 msgid "PSD File Path"
 msgstr "PSDファイルパス"
 
 msgctxt ".ptk.anm2"
+msgid "PSD Layer Selector for %1$hs"
+msgstr "%1$hs 用PSDレイヤーセレクター"
+
+msgctxt ".ptk.anm2 OverwriteSelector"
 msgid "PSD Layer Selector for %1$hs"
 msgstr "%1$hs 用PSDレイヤーセレクター"
 
@@ -379,6 +394,10 @@ msgstr "やり直し"
 msgctxt "anm2editor"
 msgid "Rename"
 msgstr "名前の変更"
+
+msgctxt "config"
+msgid "Resize Quality:"
+msgstr "リサイズ品質:"
 
 msgctxt "anm2editor"
 msgid "Reverse Items"
@@ -555,14 +574,14 @@ msgstr "%2$hs 上の %1$hs の取得に失敗しました。"
 msgid "failed to get alias data from the selected object."
 msgstr "選択中のオブジェクトからエイリアスデータが取得できませんでした。"
 
-msgid "failed to get debug mode."
-msgstr "デバッグモード設定の取得に失敗しました。"
-
 msgid "failed to get drop configuration."
 msgstr "投げ込み設定の取得に失敗しました。"
 
 msgid "failed to get preferred languages."
 msgstr "優先言語設定の取得に失敗しました。"
+
+msgid "failed to get render config."
+msgstr "描画設定の取得に失敗しました。"
 
 msgid "failed to get required functions from GCMZDrops.aux2 plug-in."
 msgstr "GCMZDrops.aux2 プラグインから必要な関数の取得に失敗しました。"

@@ -609,7 +609,7 @@ void __declspec(dllexport) RegisterPlugin(struct aviutl2_host_app_table *host) {
                       sizeof(psd_drop_handler_name) / sizeof(psd_drop_handler_name[0]),
                       L"%s",
                       L"%s",
-                      gettext("PSD/PSB file"));
+                      gettext("PSD File"));
     ov_snprintf_wchar(psd_drop_filefilter,
                       sizeof(psd_drop_filefilter) / sizeof(psd_drop_filefilter[0]),
                       L"%ls",
