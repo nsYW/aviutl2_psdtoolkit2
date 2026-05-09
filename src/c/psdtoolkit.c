@@ -629,7 +629,7 @@ process_update_editing_image_state(struct psdtoolkit *ptk, char const *file_path
       .err = &err,
   };
 
-  ptk->edit->call_edit_section_param(&ctx, get_editing_image_state_proc);
+  ptk->edit->call_read_section_param(&ctx, get_editing_image_state_proc);
   if (!ctx.success) {
     OV_ERROR_ADD_TRACE(&err);
     goto cleanup;

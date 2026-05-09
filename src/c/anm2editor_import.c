@@ -168,7 +168,7 @@ bool anm2editor_import_execute(void *const parent_window,
   }
   *scripts = (struct ptk_alias_available_scripts){0};
 
-  if (!edit_handle->call_edit_section_param(&alias_ctx, get_alias_callback)) {
+  if (!edit_handle->call_read_section_param(&alias_ctx, get_alias_callback)) {
     OV_ERROR_SET(err, ov_error_type_generic, ov_error_generic_fail, gettext("edit section is not available."));
     goto cleanup;
   }

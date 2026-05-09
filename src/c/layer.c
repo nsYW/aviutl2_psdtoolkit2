@@ -1295,7 +1295,7 @@ static void process_export_common(HWND const hwnd,
   bool success = false;
 
   // Collect ptkl targets (error is handled by showing grayed menu item)
-  edit->call_edit_section_param(&target_ctx, collect_targets_proc);
+  edit->call_read_section_param(&target_ctx, collect_targets_proc);
   if (!target_ctx.success) {
     // Get error message for display, but continue to build menu
     ptk_error_get_main_message(&err, &targets_error_message);
