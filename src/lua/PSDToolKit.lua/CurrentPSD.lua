@@ -68,10 +68,14 @@ function CurrentPSD.init(opts, obj)
 	local scene = opts.scene or 0
 	local id = PSD.make_id(scene, obj.layer)
 
-	-- Generate tag if not provided
+	-- Tag must already be assigned by the caller
 	local tag = opts.tag
 	if not tag or tag == 0 then
-		tag = ptk.generate_tag()
+		error(i18n({
+			ja_JP = "タグが設定されていません。",
+			en_US = "Tag is not set.",
+			zh_CN = "未设置标签。",
+		}))
 	end
 
 	-- Add PSD file to Go process

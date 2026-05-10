@@ -304,10 +304,6 @@ msgctxt "config"
 msgid "OK"
 msgstr "OK"
 
-msgctxt "config"
-msgid "Only create PSD file object when dropping *.&psd/*.psb file while holding Shift key"
-msgstr "Shiftキーを押しながらドロップしたときだけPSDファイルオブジェクトを作成する"
-
 msgctxt "anm2editor"
 msgid "Open"
 msgstr "開く"
@@ -347,6 +343,9 @@ msgstr "選択中のオブジェクトにPSDファイルエフェクトが見つ
 
 msgid "PSD file path is required to add to PSDToolKit anm2 Editor."
 msgstr "PSDToolKit anm2 エディターに追加するにはPSDファイルパスが必要です。"
+
+msgid "PSDTool Favorite File"
+msgstr "PSDToolお気に入りファイル"
 
 msgid "PSDToolKit"
 msgstr "PSDToolKit"
@@ -598,8 +597,14 @@ msgstr "設定の読み込みに失敗しました、デフォルト設定で継
 msgid "failed to load language resources, continuing without them."
 msgstr "言語リソースの取得に失敗しました。継続します。"
 
+msgid "failed to process PSD drop."
+msgstr "PSD ドロップの処理に失敗しました。"
+
 msgid "failed to read text file."
 msgstr "テキストファイルの読み取りに失敗しました。"
+
+msgid "failed to register PSD file, continuing anyway."
+msgstr "PSDファイルの登録に失敗しましたが、処理を続行します。"
 
 msgid "failed to register plugin."
 msgstr "プラグインの登録に失敗しました。"
@@ -612,6 +617,9 @@ msgstr "PSD プロパティのセットに失敗しました。"
 
 msgid "failed to show configuration dialog."
 msgstr "設定ダイアログの表示に失敗しました。"
+
+msgid "failed to store pending pfv filename."
+msgstr "保留中の pfv ファイル名の保存に失敗しました。"
 
 msgid "failed to update detail list."
 msgstr "詳細リストの更新に失敗しました。"

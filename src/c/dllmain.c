@@ -425,12 +425,12 @@ static void script_module_get_render_config(struct aviutl2_script_module_param *
   ptk_script_module_get_render_config(g_script_module, param, g_cache_index);
 }
 
-static void script_module_generate_tag(struct aviutl2_script_module_param *param) {
-  ptk_script_module_generate_tag(g_script_module, param);
-}
-
 static void script_module_add_psd_file(struct aviutl2_script_module_param *param) {
   ptk_script_module_add_psd_file(g_script_module, param);
+}
+
+static void script_module_set_pending_psd_pfv_filename(struct aviutl2_script_module_param *param) {
+  ptk_script_module_set_pending_psd_pfv_filename(g_script_module, param);
 }
 
 static void script_module_set_props(struct aviutl2_script_module_param *param) {
@@ -457,10 +457,24 @@ static void script_module_detect_encoding(struct aviutl2_script_module_param *pa
   ptk_script_module_detect_encoding(g_script_module, param);
 }
 
-static void psd_file_drop_handler(void *param, wchar_t const *file) {
-  // Actual PSD drop processing is handled by the GCMZDrops handler script.
-  (void)param;
+static void pfv_file_drop_handler(struct aviutl2_edit_section *edit, wchar_t const *file) {
+  (void)edit;
   (void)file;
+}
+
+static void psd_file_drop_handler(struct aviutl2_edit_section *edit, wchar_t const *file) {
+  struct ov_error err = {0};
+  if (!psdtoolkit_handle_psd_drop(g_psdtoolkit, edit, file, &err)) {
+    OV_ERROR_ADD_TRACE(&err);
+    wchar_t main_instruction[256];
+    ov_snprintf_wchar(main_instruction,
+                      sizeof(main_instruction) / sizeof(main_instruction[0]),
+                      L"%1$hs",
+                      L"%1$hs",
+                      gettext("failed to process PSD drop."));
+    ptk_error_dialog(g_plugin_window, &err, L"PSDToolKit", main_instruction, NULL, TD_ERROR_ICON, TDCBF_OK_BUTTON);
+    OV_ERROR_DESTROY(&err);
+  }
 }
 
 static bool load_gcmzdrops(struct aviutl2_script_module_table *const script_module_table, struct ov_error *const err) {
@@ -605,6 +619,8 @@ void __declspec(dllexport) RegisterPlugin(struct aviutl2_host_app_table *host) {
   {
     static wchar_t psd_drop_handler_name[64];
     static wchar_t psd_drop_filefilter[64];
+    static wchar_t pfv_drop_handler_name[64];
+    static wchar_t pfv_drop_filefilter[64];
     ov_snprintf_wchar(psd_drop_handler_name,
                       sizeof(psd_drop_handler_name) / sizeof(psd_drop_handler_name[0]),
                       L"%s",
@@ -620,15 +636,31 @@ void __declspec(dllexport) RegisterPlugin(struct aviutl2_host_app_table *host) {
         *p = L'\0';
       }
     }
-    host->register_file_drop_param_handler(psd_drop_handler_name, psd_drop_filefilter, NULL, psd_file_drop_handler);
+    ov_snprintf_wchar(pfv_drop_handler_name,
+                      sizeof(pfv_drop_handler_name) / sizeof(pfv_drop_handler_name[0]),
+                      L"%s",
+                      L"%s",
+                      gettext("PSDTool Favorite File"));
+    ov_snprintf_wchar(pfv_drop_filefilter,
+                      sizeof(pfv_drop_filefilter) / sizeof(pfv_drop_filefilter[0]),
+                      L"%ls",
+                      L"%ls (*.pfv)|*.pfv|",
+                      pfv_drop_handler_name);
+    for (wchar_t *p = pfv_drop_filefilter; *p; ++p) {
+      if (*p == L'|') {
+        *p = L'\0';
+      }
+    }
+    host->register_file_drop_handler(psd_drop_handler_name, psd_drop_filefilter, psd_file_drop_handler);
+    host->register_file_drop_handler(pfv_drop_handler_name, pfv_drop_filefilter, pfv_file_drop_handler);
   }
 
   static struct aviutl2_script_module_function script_module_functions[] = {
       {L"get_render_config", script_module_get_render_config},
       {L"get_drop_config", script_module_get_drop_config},
       {L"get_preferred_languages", script_module_get_preferred_languages},
-      {L"generate_tag", script_module_generate_tag},
       {L"add_psd_file", script_module_add_psd_file},
+      {L"set_pending_psd_pfv_filename", script_module_set_pending_psd_pfv_filename},
       {L"set_props", script_module_set_props},
       {L"draw", script_module_draw},
       {L"read_text_file", script_module_read_text_file},

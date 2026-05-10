@@ -39,7 +39,6 @@ struct ptk_script_module_set_props_result {
 struct ptk_script_module_drop_config {
   bool debug_mode;
   bool manual_shift_wav;
-  bool manual_shift_psd;
   bool manual_wav_txt_pair;
   bool manual_object_audio_text;
   bool external_wav_txt_pair;
@@ -74,6 +73,15 @@ struct ptk_script_module_callbacks {
    * @return true on success, false on failure
    */
   bool (*add_file)(void *userdata, char const *path_utf8, uint32_t tag, struct ov_error *err);
+
+  /**
+   * @brief Store the pfv filename for the next PSD drop callback
+   * @param userdata Context pointer
+   * @param pfv_filename_utf8 PFV filename in UTF-8, or empty string when absent
+   * @param err [out] Error information on failure
+   * @return true on success, false on failure
+   */
+  bool (*set_pending_psd_pfv_filename)(void *userdata, char const *pfv_filename_utf8, struct ov_error *err);
 
   /**
    * @brief Set properties for a PSD object
@@ -155,16 +163,6 @@ void ptk_script_module_get_render_config(struct ptk_script_module *sm,
                                          int cache_index);
 
 /**
- * @brief Script function: Generate a unique tag value
- *
- * Pushes an integer result containing a random tag value.
- *
- * @param sm Script module instance
- * @param param Script module parameter interface
- */
-void ptk_script_module_generate_tag(struct ptk_script_module *sm, struct aviutl2_script_module_param *param);
-
-/**
  * @brief Script function: Add a PSD file
  *
  * Parameters from script:
@@ -177,6 +175,20 @@ void ptk_script_module_generate_tag(struct ptk_script_module *sm, struct aviutl2
  * @param param Script module parameter interface
  */
 void ptk_script_module_add_psd_file(struct ptk_script_module *sm, struct aviutl2_script_module_param *param);
+
+/**
+ * @brief Script function: Store pending pfv filename for the next PSD drop
+ *
+ * Parameters from script:
+ *   [0] string: pfv_filename_utf8 - PFV filename only, or empty string when absent
+ *
+ * Pushes a boolean result indicating success.
+ *
+ * @param sm Script module instance
+ * @param param Script module parameter interface
+ */
+void ptk_script_module_set_pending_psd_pfv_filename(struct ptk_script_module *sm,
+                                                    struct aviutl2_script_module_param *param);
 
 /**
  * @brief Script function: Set PSD properties

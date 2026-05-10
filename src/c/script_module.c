@@ -7,7 +7,6 @@
 
 #include <ovarray.h>
 #include <ovmo.h>
-#include <ovrand.h>
 #include <ovutf.h>
 
 #include <aviutl2_module2.h>
@@ -51,7 +50,6 @@ static bool hex_to_ckey(char const *hex, uint64_t *ckey) {
 
 struct ptk_script_module {
   struct ptk_script_module_callbacks callbacks;
-  struct ov_rand_xoshiro256pp rng;
 };
 
 struct ptk_script_module *ptk_script_module_create(struct ptk_script_module_callbacks const *const callbacks,
@@ -69,7 +67,6 @@ struct ptk_script_module *ptk_script_module_create(struct ptk_script_module_call
   }
 
   sm->callbacks = *callbacks;
-  ov_rand_xoshiro256pp_init(&sm->rng, ov_rand_get_global_hint());
   return sm;
 }
 
@@ -118,19 +115,6 @@ cleanup:
   }
 }
 
-void ptk_script_module_generate_tag(struct ptk_script_module *const sm,
-                                    struct aviutl2_script_module_param *const param) {
-  if (!sm || !param) {
-    if (param) {
-      param->push_result_int(0);
-    }
-    return;
-  }
-  uint64_t const val = ov_rand_xoshiro256pp_next(&sm->rng);
-  int const tag = (int)(val & 0x7FFFFFFF);
-  param->push_result_int(tag);
-}
-
 void ptk_script_module_add_psd_file(struct ptk_script_module *const sm,
                                     struct aviutl2_script_module_param *const param) {
   struct ov_error err = {0};
@@ -161,6 +145,43 @@ cleanup:
   param->push_result_boolean(result);
   if (!result) {
     ptk_logf_error(&err, "%1$hs", "%1$hs", gettext("failed to add PSD file."));
+    OV_ERROR_DESTROY(&err);
+  }
+}
+
+void ptk_script_module_set_pending_psd_pfv_filename(struct ptk_script_module *const sm,
+                                                    struct aviutl2_script_module_param *const param) {
+  struct ov_error err = {0};
+  bool result = false;
+
+  if (!sm || !param) {
+    OV_ERROR_SET_GENERIC(&err, ov_error_generic_invalid_argument);
+    goto cleanup;
+  }
+
+  if (!sm->callbacks.set_pending_psd_pfv_filename) {
+    OV_ERROR_SET_GENERIC(&err, ov_error_generic_not_implemented_yet);
+    goto cleanup;
+  }
+
+  {
+    char const *const pfv_filename_utf8 = param->get_param_string(0);
+    if (!pfv_filename_utf8) {
+      OV_ERROR_SET_GENERIC(&err, ov_error_generic_invalid_argument);
+      goto cleanup;
+    }
+    if (!sm->callbacks.set_pending_psd_pfv_filename(sm->callbacks.userdata, pfv_filename_utf8, &err)) {
+      OV_ERROR_ADD_TRACE(&err);
+      goto cleanup;
+    }
+  }
+
+  result = true;
+
+cleanup:
+  param->push_result_boolean(result);
+  if (!result) {
+    ptk_logf_error(&err, "%1$hs", "%1$hs", gettext("failed to store pending pfv filename."));
     OV_ERROR_DESTROY(&err);
   }
 }
@@ -252,7 +273,6 @@ void ptk_script_module_get_drop_config(struct ptk_script_module *const sm,
     char const *keys[] = {
         "debug_mode",
         "manual_shift_wav",
-        "manual_shift_psd",
         "manual_wav_txt_pair",
         "manual_object_audio_text",
         "external_wav_txt_pair",
@@ -261,7 +281,6 @@ void ptk_script_module_get_drop_config(struct ptk_script_module *const sm,
     int values[] = {
         config.debug_mode ? 1 : 0,
         config.manual_shift_wav ? 1 : 0,
-        config.manual_shift_psd ? 1 : 0,
         config.manual_wav_txt_pair ? 1 : 0,
         config.manual_object_audio_text ? 1 : 0,
         config.external_wav_txt_pair ? 1 : 0,

@@ -14,7 +14,7 @@ local psd = require("PSDToolKitHandler.psd")
 -- @return boolean True if drag should be accepted
 function M.drag_enter(files, state)
 	config.get()
-	local r = wav.has_wav_or_object(files) or psd.find_psd(files)
+	local r = wav.has_wav_or_object(files) or psd.find_pending_pfv_filename(files) ~= nil
 	return r
 end
 
@@ -26,8 +26,17 @@ function M.drag_leave() end
 -- @param state table Drop state
 -- @return boolean Always returns true to indicate processing completed
 function M.drop(files, state)
+	local pending_pfv_filename = psd.find_pending_pfv_filename(files)
+	if pending_pfv_filename ~= nil then
+		local ptk = gcmz.get_script_module("PSDToolKit")
+		if not ptk then
+			error("PSDToolKit script module is not available")
+		end
+		if not ptk.set_pending_psd_pfv_filename(pending_pfv_filename) then
+			error("PSDToolKit: failed to store pending pfv filename")
+		end
+	end
 	local cfg = config.get()
-	psd.process(files, state, cfg)
 	wav.process(files, state, cfg)
 	return true
 end

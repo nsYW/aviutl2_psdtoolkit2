@@ -42,6 +42,8 @@ struct psdtoolkit {
   HWND hwnd_psdtoolkit;
   HWND plugin_window;
   ATOM plugin_window_class;
+  char pending_psd_pfv_filename[MAX_PATH * 4];
+  struct ov_rand_xoshiro256pp tag_rng;
 };
 
 static bool sm_get_render_config(void *const userdata,
@@ -76,6 +78,298 @@ sm_add_file(void *const userdata, char const *const path_utf8, uint32_t const ta
     return false;
   }
   return true;
+}
+
+static bool
+sm_set_pending_psd_pfv_filename(void *const userdata, char const *const pfv_filename_utf8, struct ov_error *const err) {
+  struct psdtoolkit *const ptk = (struct psdtoolkit *)userdata;
+  if (!ptk || !pfv_filename_utf8) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    return false;
+  }
+  size_t const len = strlen(pfv_filename_utf8);
+  if (len >= sizeof(ptk->pending_psd_pfv_filename)) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    return false;
+  }
+  memcpy(ptk->pending_psd_pfv_filename, pfv_filename_utf8, len + 1);
+  return true;
+}
+
+static int generate_psd_drop_tag(struct psdtoolkit *const ptk) {
+  if (!ptk) {
+    return 0;
+  }
+  return (int)(ov_rand_xoshiro256pp_next(&ptk->tag_rng) & 0x7FFFFFFF);
+}
+
+static bool
+append_char_data(char **const dest, char const *const src, size_t const src_len, struct ov_error *const err) {
+  if (!dest || (!src && src_len != 0)) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    return false;
+  }
+  size_t const old_len = *dest ? OV_ARRAY_LENGTH(*dest) : 0;
+  if (!OV_ARRAY_GROW(dest, old_len + src_len + 1)) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
+    return false;
+  }
+  if (src_len > 0) {
+    memcpy(*dest + old_len, src, src_len);
+  }
+  (*dest)[old_len + src_len] = '\0';
+  OV_ARRAY_SET_LENGTH(*dest, old_len + src_len);
+  return true;
+}
+
+static bool load_psd_drop_template(char **const data, struct ov_error *const err) {
+  wchar_t *path = NULL;
+  struct ovl_file *file = NULL;
+  uint64_t file_size = 0;
+  size_t read_bytes = 0;
+  void *dll_hinst = NULL;
+  bool success = false;
+
+  if (!data) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    return false;
+  }
+  *data = NULL;
+
+  if (!ovl_os_get_hinstance_from_fnptr((void *)load_psd_drop_template, &dll_hinst, NULL)) {
+    OV_ERROR_SET_HRESULT(err, HRESULT_FROM_WIN32(GetLastError()));
+    goto cleanup;
+  }
+  if (!ovl_path_get_module_name(&path, (HINSTANCE)dll_hinst, err)) {
+    OV_ERROR_ADD_TRACE(err);
+    goto cleanup;
+  }
+
+  {
+    wchar_t *sep = ovl_path_find_last_path_sep(path);
+    if (sep) {
+      *(sep + 1) = L'\0';
+      OV_ARRAY_SET_LENGTH(path, (size_t)(sep - path + 1));
+    } else {
+      path[0] = L'\0';
+      OV_ARRAY_SET_LENGTH(path, 0);
+    }
+
+    static wchar_t const name[] = L"template\\psd.object.template";
+    size_t const name_len = sizeof(name) / sizeof(name[0]) - 1;
+    size_t const current_len = OV_ARRAY_LENGTH(path);
+    if (!OV_ARRAY_GROW(&path, current_len + name_len + 1)) {
+      OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
+      goto cleanup;
+    }
+    memcpy(path + current_len, name, (name_len + 1) * sizeof(wchar_t));
+    OV_ARRAY_SET_LENGTH(path, current_len + name_len);
+  }
+
+  if (!ovl_file_open(path, &file, err)) {
+    OV_ERROR_ADD_TRACE(err);
+    goto cleanup;
+  }
+  if (!ovl_file_size(file, &file_size, err)) {
+    OV_ERROR_ADD_TRACE(err);
+    goto cleanup;
+  }
+  if (!OV_ARRAY_GROW(data, (size_t)file_size + 1)) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
+    goto cleanup;
+  }
+  if (file_size > 0) {
+    if (!ovl_file_read(file, *data, (size_t)file_size, &read_bytes, err)) {
+      OV_ERROR_ADD_TRACE(err);
+      goto cleanup;
+    }
+  }
+  (*data)[read_bytes] = '\0';
+  OV_ARRAY_SET_LENGTH(*data, read_bytes);
+  success = true;
+
+cleanup:
+  if (file) {
+    ovl_file_close(file);
+  }
+  if (path) {
+    OV_ARRAY_DESTROY(&path);
+  }
+  if (!success && *data) {
+    OV_ARRAY_DESTROY(data);
+  }
+  return success;
+}
+
+static bool build_psd_drop_path(struct psdtoolkit *const ptk,
+                                wchar_t const *const file,
+                                char **const path_utf8,
+                                struct ov_error *const err) {
+  if (!ptk || !file || !path_utf8) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    return false;
+  }
+  *path_utf8 = NULL;
+
+  size_t const file_len = wcslen(file);
+  size_t const utf8_len = ov_wchar_to_utf8_len(file, file_len);
+  if (utf8_len == 0) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_fail);
+    return false;
+  }
+  if (!OV_ARRAY_GROW(path_utf8, utf8_len + 1)) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_out_of_memory);
+    return false;
+  }
+  if (ov_wchar_to_utf8(file, file_len, *path_utf8, utf8_len + 1, NULL) == 0) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_fail);
+    goto cleanup;
+  }
+  OV_ARRAY_SET_LENGTH(*path_utf8, strlen(*path_utf8));
+
+  if (ptk->pending_psd_pfv_filename[0] != '\0') {
+    if (!ov_sprintf_append_char(path_utf8, err, "%1$s", "|%1$s", ptk->pending_psd_pfv_filename)) {
+      OV_ERROR_ADD_TRACE(err);
+      goto cleanup;
+    }
+  }
+  return true;
+
+cleanup:
+  if (*path_utf8) {
+    OV_ARRAY_DESTROY(path_utf8);
+  }
+  return false;
+}
+
+static bool build_psd_drop_alias(char const *const template_content,
+                                 char const *const psd_path_utf8,
+                                 int const tag,
+                                 char **const alias,
+                                 struct ov_error *const err) {
+  static char const psdfile_token[] = "%PSDFILE%";
+  static char const tag_token[] = "%TAG%";
+  static char const layer_token[] = "%LAYER%";
+  static char const layer_value[] = "L.0";
+  char tag_value[32];
+  char const *segment = template_content;
+
+  if (!template_content || !psd_path_utf8 || !alias) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    return false;
+  }
+  *alias = NULL;
+
+  ov_snprintf_char(tag_value, sizeof(tag_value), "%1$d", "%1$d", tag);
+
+  for (char const *p = template_content; *p != '\0';) {
+    char const *replacement = NULL;
+    size_t token_len = 0;
+    if (strncmp(p, psdfile_token, sizeof(psdfile_token) - 1) == 0) {
+      replacement = psd_path_utf8;
+      token_len = sizeof(psdfile_token) - 1;
+    } else if (strncmp(p, tag_token, sizeof(tag_token) - 1) == 0) {
+      replacement = tag_value;
+      token_len = sizeof(tag_token) - 1;
+    } else if (strncmp(p, layer_token, sizeof(layer_token) - 1) == 0) {
+      replacement = layer_value;
+      token_len = sizeof(layer_token) - 1;
+    }
+    if (!replacement) {
+      ++p;
+      continue;
+    }
+    if (!append_char_data(alias, segment, (size_t)(p - segment), err)) {
+      OV_ERROR_ADD_TRACE(err);
+      goto cleanup;
+    }
+    if (!append_char_data(alias, replacement, strlen(replacement), err)) {
+      OV_ERROR_ADD_TRACE(err);
+      goto cleanup;
+    }
+    p += token_len;
+    segment = p;
+  }
+
+  if (!append_char_data(alias, segment, strlen(segment), err)) {
+    OV_ERROR_ADD_TRACE(err);
+    goto cleanup;
+  }
+  return true;
+
+cleanup:
+  if (*alias) {
+    OV_ARRAY_DESTROY(alias);
+  }
+  return false;
+}
+
+bool psdtoolkit_handle_psd_drop(struct psdtoolkit *const ptk,
+                                struct aviutl2_edit_section *const edit,
+                                wchar_t const *const file,
+                                struct ov_error *const err) {
+  char *template_content = NULL;
+  char *psd_path_utf8 = NULL;
+  char *alias = NULL;
+  int layer = 0;
+  int frame = 0;
+  int tag = 0;
+  bool success = false;
+
+  if (!ptk || !edit || !file) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
+    return false;
+  }
+  if (!ptk->script_module) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_unexpected);
+    return false;
+  }
+  tag = generate_psd_drop_tag(ptk);
+
+  if (!edit->get_mouse_layer_frame(&layer, &frame)) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_fail);
+    goto cleanup;
+  }
+  if (!load_psd_drop_template(&template_content, err)) {
+    OV_ERROR_ADD_TRACE(err);
+    goto cleanup;
+  }
+  if (!build_psd_drop_path(ptk, file, &psd_path_utf8, err)) {
+    OV_ERROR_ADD_TRACE(err);
+    goto cleanup;
+  }
+
+  {
+    struct ov_error add_file_err = {0};
+    if (!sm_add_file(ptk, psd_path_utf8, (uint32_t)tag, &add_file_err)) {
+      ptk_logf_warn(&add_file_err, "%1$hs", "%1$hs", gettext("failed to register PSD file, continuing anyway."));
+      OV_ERROR_DESTROY(&add_file_err);
+    }
+  }
+
+  if (!build_psd_drop_alias(template_content, psd_path_utf8, tag, &alias, err)) {
+    OV_ERROR_ADD_TRACE(err);
+    goto cleanup;
+  }
+  if (!edit->create_object_from_alias(alias, layer, frame, 0)) {
+    OV_ERROR_SET_GENERIC(err, ov_error_generic_fail);
+    goto cleanup;
+  }
+
+  success = true;
+
+cleanup:
+  ptk->pending_psd_pfv_filename[0] = '\0';
+  if (alias) {
+    OV_ARRAY_DESTROY(&alias);
+  }
+  if (psd_path_utf8) {
+    OV_ARRAY_DESTROY(&psd_path_utf8);
+  }
+  if (template_content) {
+    OV_ARRAY_DESTROY(&template_content);
+  }
+  return success;
 }
 
 static bool sm_set_props(void *const userdata,
@@ -139,7 +433,6 @@ static bool sm_get_drop_config(void *const userdata,
 
   GET_CONFIG(debug_mode);
   GET_CONFIG(manual_shift_wav);
-  GET_CONFIG(manual_shift_psd);
   GET_CONFIG(manual_wav_txt_pair);
   GET_CONFIG(manual_object_audio_text);
   GET_CONFIG(external_wav_txt_pair);
@@ -1184,6 +1477,7 @@ NODISCARD struct psdtoolkit *psdtoolkit_create(struct ptk_cache *const cache, st
     *ptk = (struct psdtoolkit){0};
 
     ptk->cache = cache;
+    ov_rand_xoshiro256pp_init(&ptk->tag_rng, ov_rand_get_global_hint());
 
     // Create and load config
     ptk->config = ptk_config_create(err);
@@ -1211,6 +1505,7 @@ NODISCARD struct psdtoolkit *psdtoolkit_create(struct ptk_cache *const cache, st
             .userdata = ptk,
             .get_render_config = sm_get_render_config,
             .add_file = sm_add_file,
+            .set_pending_psd_pfv_filename = sm_set_pending_psd_pfv_filename,
             .set_props = sm_set_props,
             .get_drop_config = sm_get_drop_config,
             .draw = sm_draw,

@@ -16,7 +16,6 @@
 struct ptk_config {
   // Manual drop triggers
   bool manual_shift_wav;
-  bool manual_shift_psd;
   bool manual_wav_txt_pair;
   bool manual_object_audio_text;
   // External API drop triggers
@@ -83,7 +82,6 @@ struct ptk_config *ptk_config_create(struct ov_error *const err) {
   }
   *cfg = (struct ptk_config){
       .manual_shift_wav = false,
-      .manual_shift_psd = false,
       .manual_wav_txt_pair = false,
       .manual_object_audio_text = false,
       .external_wav_txt_pair = false,
@@ -146,7 +144,6 @@ cleanup:
 
 static char const g_json_key_version[] = "version";
 static char const g_json_key_manual_shift_wav[] = "manual_shift_wav";
-static char const g_json_key_manual_shift_psd[] = "manual_shift_psd";
 static char const g_json_key_manual_wav_txt_pair[] = "manual_wav_txt_pair";
 static char const g_json_key_manual_object_audio_text[] = "manual_object_audio_text";
 static char const g_json_key_external_wav_txt_pair[] = "external_wav_txt_pair";
@@ -223,11 +220,6 @@ bool ptk_config_load(struct ptk_config *const config, struct ov_error *const err
     val = yyjson_obj_get(root, g_json_key_manual_shift_wav);
     if (val && yyjson_is_bool(val)) {
       config->manual_shift_wav = yyjson_get_bool(val);
-    }
-
-    val = yyjson_obj_get(root, g_json_key_manual_shift_psd);
-    if (val && yyjson_is_bool(val)) {
-      config->manual_shift_psd = yyjson_get_bool(val);
     }
 
     val = yyjson_obj_get(root, g_json_key_manual_wav_txt_pair);
@@ -308,7 +300,6 @@ bool ptk_config_save(struct ptk_config const *const config, struct ov_error *con
 
     yyjson_mut_obj_add_str(doc, root, g_json_key_version, "1.0");
     yyjson_mut_obj_add_bool(doc, root, g_json_key_manual_shift_wav, config->manual_shift_wav);
-    yyjson_mut_obj_add_bool(doc, root, g_json_key_manual_shift_psd, config->manual_shift_psd);
     yyjson_mut_obj_add_bool(doc, root, g_json_key_manual_wav_txt_pair, config->manual_wav_txt_pair);
     yyjson_mut_obj_add_bool(doc, root, g_json_key_manual_object_audio_text, config->manual_object_audio_text);
     yyjson_mut_obj_add_bool(doc, root, g_json_key_external_wav_txt_pair, config->external_wav_txt_pair);
@@ -376,26 +367,6 @@ bool ptk_config_set_manual_shift_wav(struct ptk_config *const config, bool const
     return false;
   }
   config->manual_shift_wav = value;
-  return true;
-}
-
-bool ptk_config_get_manual_shift_psd(struct ptk_config const *const config,
-                                     bool *const value,
-                                     struct ov_error *const err) {
-  if (!config || !value) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  *value = config->manual_shift_psd;
-  return true;
-}
-
-bool ptk_config_set_manual_shift_psd(struct ptk_config *const config, bool const value, struct ov_error *const err) {
-  if (!config) {
-    OV_ERROR_SET_GENERIC(err, ov_error_generic_invalid_argument);
-    return false;
-  }
-  config->manual_shift_psd = value;
   return true;
 }
 

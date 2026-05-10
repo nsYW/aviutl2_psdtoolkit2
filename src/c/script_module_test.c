@@ -256,32 +256,6 @@ static void test_script_module_get_render_config(void) {
   g_ctx = NULL;
 }
 
-static void test_script_module_generate_tag(void) {
-  struct mock_context ctx = {0};
-  g_ctx = &ctx;
-
-  struct ov_error err = {0};
-  struct ptk_script_module_callbacks callbacks = {0};
-  struct ptk_script_module *sm = ptk_script_module_create(&callbacks, &err);
-  if (!TEST_SUCCEEDED(sm != NULL, &err)) {
-    return;
-  }
-
-  struct aviutl2_script_module_param param = {.push_result_int = mock_push_result_int};
-
-  ptk_script_module_generate_tag(sm, &param);
-  int const first_tag = ctx.pushed_int;
-  TEST_CHECK(first_tag >= 0);
-
-  ptk_script_module_generate_tag(sm, &param);
-  int const second_tag = ctx.pushed_int;
-  TEST_CHECK(second_tag >= 0);
-  TEST_CHECK(first_tag != second_tag);
-
-  ptk_script_module_destroy(&sm);
-  g_ctx = NULL;
-}
-
 static void test_script_module_add_psd_file(void) {
   struct mock_context ctx = {0};
   g_ctx = &ctx;
@@ -484,7 +458,6 @@ static void test_script_module_get_drop_config(void) {
   ctx.get_drop_config_called = false;
   ctx.drop_config_result.debug_mode = true;
   ctx.drop_config_result.manual_shift_wav = true;
-  ctx.drop_config_result.manual_shift_psd = true;
   ctx.drop_config_result.manual_wav_txt_pair = true;
   ctx.drop_config_result.manual_object_audio_text = true;
   ctx.drop_config_result.external_wav_txt_pair = true;
@@ -494,27 +467,24 @@ static void test_script_module_get_drop_config(void) {
   ptk_script_module_get_drop_config(sm, &param);
 
   TEST_CHECK(ctx.get_drop_config_called);
-  TEST_CHECK(ctx.pushed_table_num == 7);
+  TEST_CHECK(ctx.pushed_table_num == 6);
   TEST_CHECK(strcmp(ctx.pushed_table_keys[0], "debug_mode") == 0);
   TEST_CHECK(ctx.pushed_table_values[0] == 1);
   TEST_CHECK(strcmp(ctx.pushed_table_keys[1], "manual_shift_wav") == 0);
   TEST_CHECK(ctx.pushed_table_values[1] == 1);
-  TEST_CHECK(strcmp(ctx.pushed_table_keys[2], "manual_shift_psd") == 0);
+  TEST_CHECK(strcmp(ctx.pushed_table_keys[2], "manual_wav_txt_pair") == 0);
   TEST_CHECK(ctx.pushed_table_values[2] == 1);
-  TEST_CHECK(strcmp(ctx.pushed_table_keys[3], "manual_wav_txt_pair") == 0);
+  TEST_CHECK(strcmp(ctx.pushed_table_keys[3], "manual_object_audio_text") == 0);
   TEST_CHECK(ctx.pushed_table_values[3] == 1);
-  TEST_CHECK(strcmp(ctx.pushed_table_keys[4], "manual_object_audio_text") == 0);
+  TEST_CHECK(strcmp(ctx.pushed_table_keys[4], "external_wav_txt_pair") == 0);
   TEST_CHECK(ctx.pushed_table_values[4] == 1);
-  TEST_CHECK(strcmp(ctx.pushed_table_keys[5], "external_wav_txt_pair") == 0);
+  TEST_CHECK(strcmp(ctx.pushed_table_keys[5], "external_object_audio_text") == 0);
   TEST_CHECK(ctx.pushed_table_values[5] == 1);
-  TEST_CHECK(strcmp(ctx.pushed_table_keys[6], "external_object_audio_text") == 0);
-  TEST_CHECK(ctx.pushed_table_values[6] == 1);
 
   // Test: successful get_drop_config with all false
   ctx.get_drop_config_called = false;
   ctx.drop_config_result.debug_mode = false;
   ctx.drop_config_result.manual_shift_wav = false;
-  ctx.drop_config_result.manual_shift_psd = false;
   ctx.drop_config_result.manual_wav_txt_pair = false;
   ctx.drop_config_result.manual_object_audio_text = false;
   ctx.drop_config_result.external_wav_txt_pair = false;
@@ -524,20 +494,18 @@ static void test_script_module_get_drop_config(void) {
   ptk_script_module_get_drop_config(sm, &param);
 
   TEST_CHECK(ctx.get_drop_config_called);
-  TEST_CHECK(ctx.pushed_table_num == 7);
+  TEST_CHECK(ctx.pushed_table_num == 6);
   TEST_CHECK(ctx.pushed_table_values[0] == 0);
   TEST_CHECK(ctx.pushed_table_values[1] == 0);
   TEST_CHECK(ctx.pushed_table_values[2] == 0);
   TEST_CHECK(ctx.pushed_table_values[3] == 0);
   TEST_CHECK(ctx.pushed_table_values[4] == 0);
   TEST_CHECK(ctx.pushed_table_values[5] == 0);
-  TEST_CHECK(ctx.pushed_table_values[6] == 0);
 
   // Test: mixed values
   ctx.get_drop_config_called = false;
   ctx.drop_config_result.debug_mode = true;
   ctx.drop_config_result.manual_shift_wav = true;
-  ctx.drop_config_result.manual_shift_psd = false;
   ctx.drop_config_result.manual_wav_txt_pair = false;
   ctx.drop_config_result.manual_object_audio_text = true;
   ctx.drop_config_result.external_wav_txt_pair = false;
@@ -547,14 +515,13 @@ static void test_script_module_get_drop_config(void) {
   ptk_script_module_get_drop_config(sm, &param);
 
   TEST_CHECK(ctx.get_drop_config_called);
-  TEST_CHECK(ctx.pushed_table_num == 7);
+  TEST_CHECK(ctx.pushed_table_num == 6);
   TEST_CHECK(ctx.pushed_table_values[0] == 1);
   TEST_CHECK(ctx.pushed_table_values[1] == 1);
   TEST_CHECK(ctx.pushed_table_values[2] == 0);
-  TEST_CHECK(ctx.pushed_table_values[3] == 0);
-  TEST_CHECK(ctx.pushed_table_values[4] == 1);
-  TEST_CHECK(ctx.pushed_table_values[5] == 0);
-  TEST_CHECK(ctx.pushed_table_values[6] == 1);
+  TEST_CHECK(ctx.pushed_table_values[3] == 1);
+  TEST_CHECK(ctx.pushed_table_values[4] == 0);
+  TEST_CHECK(ctx.pushed_table_values[5] == 1);
 
   // Test: callback failure
   ctx.get_drop_config_called = false;
@@ -832,7 +799,6 @@ static void test_script_module_detect_encoding(void) {
 
 TEST_LIST = {
     {"test_script_module_get_render_config", test_script_module_get_render_config},
-    {"test_script_module_generate_tag", test_script_module_generate_tag},
     {"test_script_module_add_psd_file", test_script_module_add_psd_file},
     {"test_script_module_set_props", test_script_module_set_props},
     {"test_script_module_get_drop_config", test_script_module_get_drop_config},

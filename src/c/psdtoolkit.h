@@ -3,6 +3,7 @@
 #include <ovbase.h>
 
 struct aviutl2_edit_handle;
+struct aviutl2_edit_section;
 struct aviutl2_host_app_table;
 struct aviutl2_project_file;
 struct aviutl2_script_module_param;
@@ -85,3 +86,17 @@ void psdtoolkit_project_save_handler(struct psdtoolkit *ptk, struct aviutl2_proj
  * @param hwnd Parent window handle
  */
 void psdtoolkit_show_config_dialog(struct psdtoolkit *ptk, void *hwnd);
+
+/**
+ * @brief Handle PSD file drop via the AviUtl2 SDK callback
+ *
+ * @param ptk Plugin context
+ * @param edit Edit section provided by the file drop callback
+ * @param file Dropped PSD/PSB file path
+ * @param err [out] Error information on failure
+ * @return true on success, false on failure
+ */
+bool psdtoolkit_handle_psd_drop(struct psdtoolkit *ptk,
+                                struct aviutl2_edit_section *edit,
+                                wchar_t const *file,
+                                struct ov_error *err);
