@@ -19,6 +19,32 @@ PSDToolKit を使用したこと及び使用しなかったことによるいか
 
 これに同意できない場合、あなたは PSDToolKit を使用することができません。
 
+インストール / アンインストール
+-------------------------------
+
+PSDToolKit は .au2pkg.zip 形式で配布されています。
+動作には AviUtl ExEdit2 version @PTK_REQUIRED_AVIUTL2_VERSION_DISPLAY@ 以降と、GCMZDrops @PTK_REQUIRED_GCMZDROPS_VERSION_TAG@ 以降が必要です。
+
+### インストール
+
+1. [GCMZDrops](https://github.com/oov/aviutl2_gcmzdrops2/releases) @PTK_REQUIRED_GCMZDROPS_VERSION_TAG@ 以降をインストールまたは更新
+2. `psdtoolkit_*.au2pkg.zip` をダウンロード
+3. AviUtl ExEdit2 を起動
+4. 動画プレビュー領域に `psdtoolkit_*.au2pkg.zip` をドラッグ＆ドロップ
+5. AviUtl ExEdit2 を再起動
+
+GCMZDrops が入っていない、または想定よりバージョンが古い場合、PSDToolKit は正しく動作しません。
+
+### アンインストール
+
+1. AviUtl ExEdit2 を起動
+2. メニューから `その他` → `パッケージ情報` を選んで `パッケージ情報` ダイアログを開く
+3. ダイアログ内にある `PSDToolKit` を右クリックして `アンインストール` を選択
+
+なお、この手順ではインストール時に配置されたファイル以外は削除されません。
+`Plugin\PSDToolKit` 内に独自に配置したファイルなどがある場合は必要に応じて手動で削除してください。
+GCMZDrops はこの手順ではアンインストールされないので、必要に応じて別途アンインストールしてください。
+
 コンテンツツリー登録のお願い
 ----------------------------
 

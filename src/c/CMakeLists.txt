@@ -101,6 +101,11 @@ add_custom_target(${PROJECT_NAME}_generate_version_h
     -Dlocal_dir="${CMAKE_CURRENT_SOURCE_DIR}"
     -Dinput_file="${CMAKE_CURRENT_SOURCE_DIR}/version.h.in"
     -Doutput_file="${VERSION_H}"
+    -DPTK_REQUIRED_AVIUTL2_VERSION_UINT32="${PTK_REQUIRED_AVIUTL2_VERSION_UINT32}"
+    -DPTK_REQUIRED_AVIUTL2_VERSION_NAME="${PTK_REQUIRED_AVIUTL2_VERSION_NAME}"
+    -DPTK_REQUIRED_AVIUTL2_VERSION_DISPLAY="${PTK_REQUIRED_AVIUTL2_VERSION_DISPLAY}"
+    -DPTK_REQUIRED_GCMZDROPS_VERSION_UINT32="${PTK_REQUIRED_GCMZDROPS_VERSION_UINT32}"
+    -DPTK_REQUIRED_GCMZDROPS_VERSION_TAG="${PTK_REQUIRED_GCMZDROPS_VERSION_TAG}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/version.cmake"
   BYPRODUCTS "${VERSION_H}" "${VERSION_ENV}"
   COMMENT "Checking version information..."
@@ -333,6 +338,32 @@ set_tests_properties(test_lua_exclusive_support PROPERTIES
 )
 
 set(LUA_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lua")
+set(PTK_PACKAGE_INI "${EXPORT_DIR}/package.ini")
+set(PTK_PACKAGE_TXT "${EXPORT_DIR}/package.txt")
+set(PTK_PLUGIN_README "${PTK_PLUGIN_DIR}/PSDToolKit.txt")
+function(ptk_generate_versioned_text output_file output_dir input_file comment)
+  add_custom_command(
+    OUTPUT "${output_file}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${output_dir}"
+    COMMAND ${CMAKE_COMMAND}
+      -Dversion_env="${CMAKE_CURRENT_BINARY_DIR}/version.env"
+      -Dinput_file="${input_file}"
+      -Doutput_file="${output_file}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/generate_versioned_text.cmake"
+    DEPENDS
+      "${input_file}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/generate_versioned_text.cmake"
+      ${PROJECT_NAME}_generate_version_h
+      "${CMAKE_CURRENT_BINARY_DIR}/version.env"
+    COMMENT "${comment}"
+  )
+endfunction()
+ptk_generate_versioned_text("${PTK_PACKAGE_INI}" "${EXPORT_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/package.ini.in" "Generating package.ini")
+ptk_generate_versioned_text("${PTK_PACKAGE_TXT}" "${EXPORT_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/package.txt.in" "Generating package.txt")
+ptk_generate_versioned_text("${PTK_PLUGIN_README}" "${PTK_PLUGIN_DIR}" "${CMAKE_SOURCE_DIR}/README.md" "Generating PSDToolKit.txt")
+add_custom_target(${PROJECT_NAME}_package_files ALL DEPENDS "${PTK_PACKAGE_INI}" "${PTK_PACKAGE_TXT}" "${PTK_PLUGIN_README}")
+add_dependencies(${PROJECT_NAME}_package_files ${PROJECT_NAME}_generate_version_h)
+add_dependencies(psdtoolkit ${PROJECT_NAME}_package_files)
 set(BUNDLE_LUA_CMAKE "${CMAKE_SOURCE_DIR}/src/cmake/bundle_lua.cmake")
 
 # Bundle Lua files
@@ -394,10 +425,6 @@ add_custom_command(
 )
 add_custom_target(${PROJECT_NAME}_generate_embed_lua_headers DEPENDS "${EMBED_LUA_HANDLER_H}")
 add_dependencies(psdtoolkit ${PROJECT_NAME}_generate_embed_lua_headers)
-
-add_custom_command(TARGET psdtoolkit POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/README.md" "${PTK_PLUGIN_DIR}/PSDToolKit.txt"
-)
 
 # Copy scripts to export directory
 # Default: copy to Script/PSDToolKit with same filename

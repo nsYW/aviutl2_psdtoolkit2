@@ -63,9 +63,6 @@ static HWND g_plugin_window = NULL;
 static HWND g_anm2editor_window = NULL;
 static int g_cache_index = 0;
 
-static uint32_t const required_aviutl2_version = 2004400;
-static char const required_aviutl2_version_name[] = "version2.0beta44";
-
 /**
  * @brief Increment cache index and clear the image cache.
  *
@@ -259,7 +256,7 @@ struct aviutl2_common_plugin_table *__declspec(dllexport) GetCommonPluginTable(v
 }
 
 DWORD __declspec(dllexport) RequiredVersion(void);
-DWORD __declspec(dllexport) RequiredVersion(void) { return required_aviutl2_version; }
+DWORD __declspec(dllexport) RequiredVersion(void) { return PTK_REQUIRED_AVIUTL2_VERSION_UINT32; }
 
 BOOL __declspec(dllexport) InitializePlugin(DWORD version);
 BOOL __declspec(dllexport) InitializePlugin(DWORD version) {
@@ -270,13 +267,13 @@ BOOL __declspec(dllexport) InitializePlugin(DWORD version) {
   g_cache_index = 0;
 
   // Check minimum required AviUtl ExEdit2 version
-  if (version < required_aviutl2_version) {
+  if (version < PTK_REQUIRED_AVIUTL2_VERSION_UINT32) {
     OV_ERROR_SETF(&err,
                   ov_error_type_generic,
                   ov_error_generic_fail,
                   "%1$s",
                   gettext("PSDToolKit requires AviUtl ExEdit2 %1$s or later."),
-                  required_aviutl2_version_name);
+                  PTK_REQUIRED_AVIUTL2_VERSION_NAME);
     OV_ERROR_ADD_TRACE(&err);
     goto cleanup;
   }
@@ -528,9 +525,6 @@ static bool load_gcmzdrops(struct aviutl2_script_module_table *const script_modu
   }
 
   {
-    static uint32_t const target_version = 67109035;
-    static char const target_version_str[] = "v2.0.0beta1";
-
     typedef uint32_t (*get_version_func)(void);
     typedef bool (*register_script_module_func)(struct aviutl2_script_module_table *const table);
     typedef bool (*add_handler_script_func)(char const *const script, size_t const script_len);
@@ -552,13 +546,13 @@ static bool load_gcmzdrops(struct aviutl2_script_module_table *const script_modu
       goto cleanup;
     }
 
-    if (gcmz_get_version() < target_version) {
+    if (gcmz_get_version() < PTK_REQUIRED_GCMZDROPS_VERSION_UINT32) {
       OV_ERROR_SETF(err,
                     ov_error_type_generic,
                     ov_error_generic_fail,
                     "%1$hs",
                     gettext("GCMZDrops version is too old. PSDToolKit requires GCMZDrops %1$hs or later."),
-                    target_version_str);
+                    PTK_REQUIRED_GCMZDROPS_VERSION_TAG);
       goto cleanup;
     }
 
